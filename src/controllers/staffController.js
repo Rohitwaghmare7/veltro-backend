@@ -11,6 +11,19 @@ exports.getStaff = async (req, res, next) => {
         const staff = await Staff.find({ businessId: req.businessId })
             .sort({ createdAt: -1 });
 
+        // Check and update expired invites
+        const updates = [];
+        staff.forEach(member => {
+            if (member.isInviteExpired() && member.inviteStatus === 'pending') {
+                member.inviteStatus = 'expired';
+                updates.push(member.save());
+            }
+        });
+        
+        if (updates.length > 0) {
+            await Promise.all(updates);
+        }
+
         res.json({ success: true, data: staff, count: staff.length });
     } catch (error) {
         next(error);
@@ -111,7 +124,49 @@ exports.updateStaff = async (req, res, next) => {
     }
 };
 
-// @desc    Remove staff member
+// @desc    Deactivate staff member (soft delete)
+// @route   PUT /api/staff/:id/deactivate
+// @access  Private (Owner only)
+exports.deactivateStaff = async (req, res, next) => {
+    try {
+        const staff = await Staff.findOneAndUpdate(
+            { _id: req.params.id, businessId: req.businessId },
+            { status: 'deactivated' },
+            { new: true }
+        );
+
+        if (!staff) {
+            return res.status(404).json({ success: false, message: 'Staff not found' });
+        }
+
+        res.json({ success: true, data: staff, message: 'Staff member deactivated' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Reactivate staff member
+// @route   PUT /api/staff/:id/reactivate
+// @access  Private (Owner only)
+exports.reactivateStaff = async (req, res, next) => {
+    try {
+        const staff = await Staff.findOneAndUpdate(
+            { _id: req.params.id, businessId: req.businessId },
+            { status: 'active' },
+            { new: true }
+        );
+
+        if (!staff) {
+            return res.status(404).json({ success: false, message: 'Staff not found' });
+        }
+
+        res.json({ success: true, data: staff, message: 'Staff member reactivated' });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Remove staff member (hard delete)
 // @route   DELETE /api/staff/:id
 // @access  Private (Owner only)
 exports.removeStaff = async (req, res, next) => {

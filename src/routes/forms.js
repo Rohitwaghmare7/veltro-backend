@@ -8,6 +8,8 @@ const {
     updateForm,
     deleteForm,
     getSubmissions,
+    exportSubmissions,
+    getBookingForms,
     getPublicForm,
     submitForm
 } = require('../controllers/formController');
@@ -31,5 +33,7 @@ router.route('/:id')
     .delete(deleteForm);
 
 router.get('/:id/submissions', getSubmissions);
+router.get('/:id/export', exportSubmissions);
+router.get('/booking/:bookingId', getBookingForms);
 
 module.exports = router;

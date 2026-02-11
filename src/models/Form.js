@@ -21,13 +21,13 @@ const formSchema = new mongoose.Schema(
                 id: String,
                 type: {
                     type: String,
-                    enum: ['text', 'textarea', 'number', 'email', 'phone', 'select', 'checkbox', 'date'],
+                    enum: ['text', 'textarea', 'number', 'email', 'phone', 'select', 'checkbox', 'date', 'multiselect'],
                     required: true,
                 },
                 label: { type: String, required: true },
                 placeholder: String,
                 required: { type: Boolean, default: false },
-                options: [String], // For select/radio
+                options: [String], // For select/radio/multiselect
             }
         ],
         isActive: {
@@ -37,6 +37,20 @@ const formSchema = new mongoose.Schema(
         submissionsCount: {
             type: Number,
             default: 0,
+        },
+        // Link to booking types
+        linkedServices: [String], // Service names this form is linked to
+        isRequiredForBooking: {
+            type: Boolean,
+            default: false,
+        },
+        autoSendAfterBooking: {
+            type: Boolean,
+            default: false,
+        },
+        sendDelay: {
+            type: Number,
+            default: 0, // Minutes after booking to send form
         },
     },
     {

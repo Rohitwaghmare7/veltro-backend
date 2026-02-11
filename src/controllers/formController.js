@@ -118,6 +118,101 @@ exports.getSubmissions = async (req, res, next) => {
     }
 };
 
+// @desc    Export form submissions as CSV
+// @route   GET /api/forms/:id/export
+// @access  Private
+exports.exportSubmissions = async (req, res, next) => {
+    try {
+        // First ensure user owns the form
+        const form = await Form.findOne({ _id: req.params.id, businessId: req.businessId });
+        if (!form) {
+            return res.status(404).json({ success: false, message: 'Form not found' });
+        }
+
+        const submissions = await Submission.find({ formId: req.params.id })
+            .sort({ createdAt: -1 })
+            .populate('contactId', 'name email')
+            .lean();
+
+        if (submissions.length === 0) {
+            return res.status(404).json({ success: false, message: 'No submissions to export' });
+        }
+
+        // Build CSV
+        const headers = ['Submission Date', 'Contact Name', 'Contact Email'];
+        
+        // Add field labels as headers
+        form.fields.forEach(field => {
+            headers.push(field.label);
+        });
+
+        const csvRows = [headers.join(',')];
+
+        // Add data rows
+        submissions.forEach(submission => {
+            const row = [
+                new Date(submission.createdAt).toLocaleString(),
+                submission.contactId?.name || 'N/A',
+                submission.contactId?.email || 'N/A',
+            ];
+
+            // Add field values
+            form.fields.forEach(field => {
+                // Handle Map object - convert to plain object if needed
+                let value = '';
+                if (submission.data instanceof Map) {
+                    value = submission.data.get(field.id) || '';
+                } else if (typeof submission.data === 'object') {
+                    value = submission.data[field.id] || '';
+                }
+                
+                // Handle arrays (for multiselect, checkbox)
+                if (Array.isArray(value)) {
+                    value = value.join(', ');
+                }
+                
+                // Escape commas and quotes in CSV
+                const escapedValue = String(value).replace(/"/g, '""');
+                row.push(`"${escapedValue}"`);
+            });
+
+            csvRows.push(row.join(','));
+        });
+
+        const csv = csvRows.join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="${form.title.replace(/[^a-z0-9]/gi, '_')}_submissions.csv"`);
+        res.send(csv);
+    } catch (error) {
+        console.error('CSV Export Error:', error);
+        next(error);
+    }
+};
+
+// @desc    Get forms linked to a booking
+// @route   GET /api/forms/booking/:bookingId
+// @access  Private
+exports.getBookingForms = async (req, res, next) => {
+    try {
+        const BookingForm = require('../models/BookingForm');
+        const { bookingId } = req.params;
+
+        const bookingForms = await BookingForm.find({
+            bookingId,
+            businessId: req.businessId,
+        })
+            .populate('formId', 'title description')
+            .populate('submissionId')
+            .sort({ createdAt: 1 })
+            .lean();
+
+        res.json({ success: true, data: bookingForms, count: bookingForms.length });
+    } catch (error) {
+        next(error);
+    }
+};
+
 
 // === PUBLIC ENDPOINTS ===
 
@@ -198,12 +293,70 @@ exports.submitForm = async (req, res, next) => {
                     name: name,
                     email: email,
                     phone: phone,
-                    source: 'contact_form',
+                    source: 'form_submission',
                     notes: `Created from form submission: ${form.title}`,
                     tags: ['Form Submission']
                 });
             }
             contactId = contact._id;
+
+            // Create conversation if email is provided
+            if (email) {
+                const Conversation = require('../models/Conversation');
+                const Message = require('../models/Message');
+                const Business = require('../models/Business');
+                const { fireAutomation, TRIGGERS } = require('../services/automation.service');
+
+                // Check if conversation already exists
+                let conversation = await Conversation.findOne({
+                    businessId: form.businessId,
+                    contactId: contact._id,
+                });
+
+                if (!conversation) {
+                    // Create new conversation
+                    conversation = await Conversation.create({
+                        businessId: form.businessId,
+                        contactId: contact._id,
+                        channel: 'email',
+                        status: 'open',
+                        lastMessageAt: new Date(),
+                        automationPaused: false,
+                    });
+
+                    // Get business details for automation
+                    const business = await Business.findById(form.businessId);
+
+                    // Fire NEW_CONTACT automation (welcome email)
+                    if (business && business.isSetupComplete) {
+                        await fireAutomation(TRIGGERS.NEW_CONTACT, {
+                            businessId: form.businessId,
+                            contact: contact,
+                            business,
+                        });
+                    }
+                } else {
+                    // Update existing conversation
+                    await Conversation.findByIdAndUpdate(conversation._id, {
+                        $set: { lastMessageAt: new Date() },
+                    });
+                }
+
+                // Create a message record for the form submission
+                await Message.create({
+                    conversationId: conversation._id,
+                    direction: 'inbound',
+                    type: 'manual',
+                    content: `Form submitted: ${form.title}`,
+                    channel: 'email',
+                    sentAt: new Date(),
+                    metadata: {
+                        formId: form._id,
+                        formTitle: form.title,
+                        submissionData: data,
+                    },
+                });
+            }
         }
 
         const submission = await Submission.create({

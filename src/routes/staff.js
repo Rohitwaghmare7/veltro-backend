@@ -6,6 +6,8 @@ const {
     inviteStaff,
     updateStaff,
     removeStaff,
+    deactivateStaff,
+    reactivateStaff,
     acceptInvite,
     getStaffMe,
     getMyBusinesses,
@@ -42,5 +44,8 @@ router.route('/')
 router.route('/:id')
     .put(updateStaff)
     .delete(removeStaff);
+
+router.put('/:id/deactivate', deactivateStaff);
+router.put('/:id/reactivate', reactivateStaff);
 
 module.exports = router;

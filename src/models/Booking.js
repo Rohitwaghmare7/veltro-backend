@@ -62,6 +62,22 @@ const bookingSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        assignedTo: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+        reminderSent: {
+            type: Boolean,
+            default: false,
+        },
+        formReminderSent: {
+            type: Boolean,
+            default: false,
+        },
+        googleCalendarEventId: {
+            type: String,
+            default: null,
+        },
     },
     {
         timestamps: true,

@@ -43,10 +43,22 @@ const staffSchema = new mongoose.Schema(
             type: Date,
             default: Date.now,
         },
+        status: {
+            type: String,
+            enum: ['active', 'inactive', 'deactivated'],
+            default: 'active',
+        },
     },
     {
         timestamps: true,
     }
 );
+
+// Method to check if invite token is expired (48 hours)
+staffSchema.methods.isInviteExpired = function() {
+    if (this.inviteStatus !== 'pending') return false;
+    const hoursSinceInvite = (Date.now() - this.invitedAt.getTime()) / (1000 * 60 * 60);
+    return hoursSinceInvite > 48;
+};
 
 module.exports = mongoose.model('Staff', staffSchema);

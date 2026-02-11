@@ -126,6 +126,38 @@ const businessSchema = new mongoose.Schema(
             unique: true,
             sparse: true,
         },
+        // Integrations configuration
+        integrations: {
+            email: {
+                connected: { type: Boolean, default: true },
+                lastSync: Date,
+                error: String,
+            },
+            googleCalendar: {
+                connected: { type: Boolean, default: false },
+                accessToken: String,
+                refreshToken: String,
+                expiryDate: Number,
+                lastSync: Date,
+                error: String,
+            },
+            sms: {
+                connected: { type: Boolean, default: false },
+                accountSid: String,
+                authToken: String,
+                phoneNumber: String,
+                lastSync: Date,
+                error: String,
+            },
+            cloudinary: {
+                connected: { type: Boolean, default: false },
+                cloudName: String,
+                apiKey: String,
+                apiSecret: String,
+                lastSync: Date,
+                error: String,
+            },
+        },
     },
     {
         timestamps: true,

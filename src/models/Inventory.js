@@ -31,7 +31,23 @@ const inventorySchema = new mongoose.Schema(
             type: Number,
             default: 5,
             min: 0,
-        }
+        },
+        quantity: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        vendorEmail: {
+            type: String,
+            trim: true,
+        },
+        lastRestocked: {
+            type: Date,
+        },
+        alertSent: {
+            type: Boolean,
+            default: false,
+        },
     },
     {
         timestamps: true,

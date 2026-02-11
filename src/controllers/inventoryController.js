@@ -19,15 +19,18 @@ exports.getInventory = async (req, res, next) => {
 // @access  Private
 exports.addItem = async (req, res, next) => {
     try {
-        const { name, category, stock, unit, threshold } = req.body;
+        const { name, category, stock, unit, threshold, vendorEmail } = req.body;
 
         const item = await Inventory.create({
             businessId: req.businessId,
             name,
-            category,
+            category: category || 'General',
             stock,
             unit,
-            threshold
+            threshold,
+            vendorEmail,
+            lastRestocked: new Date(), // Set initial restock date
+            quantity: stock, // Sync quantity with stock
         });
 
         res.status(201).json({ success: true, data: item });
@@ -41,14 +44,63 @@ exports.addItem = async (req, res, next) => {
 // @access  Private
 exports.updateItem = async (req, res, next) => {
     try {
-        let item = await Inventory.findOneAndUpdate(
-            { _id: req.params.id, businessId: req.businessId },
-            req.body,
-            { new: true, runValidators: true }
-        );
+        const { fireAutomation, TRIGGERS } = require('../services/automation.service');
+        const Business = require('../models/Business');
+        const User = require('../models/User');
+
+        let item = await Inventory.findOne({
+            _id: req.params.id,
+            businessId: req.businessId,
+        });
 
         if (!item) {
             return res.status(404).json({ success: false, message: 'Item not found' });
+        }
+
+        // Check if quantity is being updated
+        const oldQuantity = item.quantity || item.stock || 0;
+        const newQuantity = req.body.quantity !== undefined ? req.body.quantity : req.body.stock;
+
+        // Update item
+        Object.assign(item, req.body);
+        
+        // If quantity field exists in update, sync with stock
+        if (req.body.quantity !== undefined) {
+            item.stock = req.body.quantity;
+        }
+        if (req.body.stock !== undefined) {
+            item.quantity = req.body.stock;
+        }
+
+        await item.save();
+
+        // Check if we hit the threshold exactly (alert fires AT threshold, not below)
+        const threshold = item.threshold || 0;
+        const currentQty = item.quantity || item.stock || 0;
+
+        if (currentQty === threshold && oldQuantity > threshold && !item.alertSent) {
+            // Fire inventory alert
+            const business = await Business.findById(req.businessId);
+            const owner = await User.findOne({ businessId: req.businessId, role: 'owner' });
+
+            if (business && owner && owner.email) {
+                await fireAutomation(TRIGGERS.INVENTORY_LOW, {
+                    businessId: req.businessId,
+                    item,
+                    business,
+                    ownerEmail: owner.email,
+                });
+                
+                // Mark alert as sent
+                item.alertSent = true;
+                await item.save();
+            }
+        }
+
+        // Reset alertSent if quantity goes back above threshold
+        if (currentQty > threshold && item.alertSent) {
+            item.alertSent = false;
+            await item.save();
         }
 
         res.json({ success: true, data: item });
@@ -93,6 +145,7 @@ exports.restockItem = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Item not found' });
         }
 
+        const oldStock = item.stock;
         let newStock = item.stock;
         const qty = parseInt(quantity, 10) || 0;
 
@@ -106,6 +159,14 @@ exports.restockItem = async (req, res, next) => {
         }
 
         item.stock = newStock;
+        item.quantity = newStock; // Sync quantity
+        
+        // Update lastRestocked if stock increased
+        if (newStock > oldStock) {
+            item.lastRestocked = new Date();
+            item.alertSent = false; // Reset alert when restocked
+        }
+
         await item.save();
 
         res.json({ success: true, data: item });

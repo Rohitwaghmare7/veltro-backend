@@ -261,3 +261,130 @@ exports.refreshToken = async (req, res, next) => {
         });
     }
 };
+
+// @desc    Forgot password - send reset email
+// @route   POST /api/auth/forgot-password
+// @access  Public
+exports.forgotPassword = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide an email address',
+            });
+        }
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            // Don't reveal if user exists or not for security
+            return res.status(200).json({
+                success: true,
+                message: 'If an account with that email exists, a password reset link has been sent.',
+            });
+        }
+
+        // Generate reset token
+        const resetToken = user.getResetPasswordToken();
+        await user.save({ validateBeforeSave: false });
+
+        // Create reset URL
+        const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
+
+        try {
+            const { sendEmail, passwordResetEmail } = require('../services/email.service');
+            const emailTemplate = passwordResetEmail(user.name, resetUrl);
+
+            await sendEmail({
+                to: user.email,
+                subject: emailTemplate.subject,
+                html: emailTemplate.html,
+            });
+
+            res.status(200).json({
+                success: true,
+                message: 'Password reset email sent successfully',
+            });
+        } catch (error) {
+            console.error('❌ Error sending password reset email:', error);
+
+            // Clear reset token if email fails
+            user.resetPasswordToken = undefined;
+            user.resetPasswordExpire = undefined;
+            await user.save({ validateBeforeSave: false });
+
+            return res.status(500).json({
+                success: false,
+                message: 'Email could not be sent. Please try again later.',
+            });
+        }
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Reset password
+// @route   POST /api/auth/reset-password/:token
+// @access  Public
+exports.resetPassword = async (req, res, next) => {
+    try {
+        const { password } = req.body;
+        const crypto = require('crypto');
+
+        if (!password) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide a new password',
+            });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters long',
+            });
+        }
+
+        // Hash the token from URL to match with database
+        const resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(req.params.token)
+            .digest('hex');
+
+        // Find user with valid token and not expired
+        const user = await User.findOne({
+            resetPasswordToken,
+            resetPasswordExpire: { $gt: Date.now() },
+        }).select('+resetPasswordToken +resetPasswordExpire');
+
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired reset token',
+            });
+        }
+
+        // Set new password
+        user.password = password;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+        await user.save();
+
+        // Generate new auth tokens
+        const token = generateToken(user._id);
+        const refreshToken = generateRefreshToken(user._id);
+
+        res.status(200).json({
+            success: true,
+            message: 'Password reset successful',
+            data: {
+                token,
+                refreshToken,
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+};
