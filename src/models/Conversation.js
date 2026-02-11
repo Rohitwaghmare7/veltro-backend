@@ -43,6 +43,9 @@ const conversationSchema = new mongoose.Schema(
             type: Number,
             default: 0,
         },
+        summary: {
+            type: String,
+        },
     },
     {
         timestamps: true,

@@ -23,6 +23,9 @@ const staffRoutes = require('./src/routes/staff');
 const inboxRoutes = require('./src/routes/inbox');
 const automationRoutes = require('./src/routes/automations');
 const integrationRoutes = require('./src/routes/integrations');
+const aiRoutes = require('./src/routes/ai');
+const notificationRoutes = require('./src/routes/notifications');
+const testNotificationRoutes = require('./src/routes/test-notifications');
 
 const app = express();
 const server = http.createServer(app);
@@ -179,6 +182,9 @@ app.use('/api/staff', staffRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/automations', automationRoutes);
 app.use('/api/integrations', integrationRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/test-notifications', testNotificationRoutes);
 
 // Error handler (must be after routes)
 app.use(errorHandler);
