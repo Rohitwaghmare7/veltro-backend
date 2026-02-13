@@ -97,6 +97,29 @@ exports.testConnection = async (req, res, next) => {
                 }
                 break;
 
+            case 'gmail':
+                if (business.integrations?.gmail?.accessToken) {
+                    try {
+                        const oauth2Client = new google.auth.OAuth2(
+                            process.env.GOOGLE_CLIENT_ID,
+                            process.env.GOOGLE_CLIENT_SECRET,
+                            process.env.GOOGLE_REDIRECT_URI
+                        );
+                        oauth2Client.setCredentials({
+                            access_token: business.integrations.gmail.accessToken,
+                            refresh_token: business.integrations.gmail.refreshToken,
+                        });
+
+                        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+                        await gmail.users.getProfile({ userId: 'me' });
+
+                        testResult = { success: true, message: 'Gmail connection is working' };
+                    } catch (error) {
+                        testResult = { success: false, message: 'Gmail connection failed: ' + error.message };
+                    }
+                }
+                break;
+
             case 'sms':
                 if (business.integrations?.sms?.accountSid && business.integrations?.sms?.authToken) {
                     testResult = { success: true, message: 'SMS configuration is valid' };

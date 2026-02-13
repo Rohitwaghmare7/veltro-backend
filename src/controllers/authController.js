@@ -89,70 +89,7 @@ exports.register = async (req, res, next) => {
         const token = generateToken(user._id);
         const refreshToken = generateRefreshToken(user._id);
 
-        // Send welcome email (only for new owners, not staff)
-        if (userRole === 'owner') {
-            try {
-                const { sendEmail } = require('../services/email.service');
-                
-                const welcomeEmailHtml = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <style>
-                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
-                            .button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
-                            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <div class="header">
-                                <h1>Welcome to Veltro! 🎉</h1>
-                            </div>
-                            <div class="content">
-                                <p>Hi ${name},</p>
-                                <p>Thank you for joining Veltro! We're excited to have you on board.</p>
-                                <p>Veltro is your all-in-one platform for managing your business operations:</p>
-                                <ul>
-                                    <li>📧 Inbox - Manage customer communications</li>
-                                    <li>📅 Bookings - Schedule and track appointments</li>
-                                    <li>📝 Forms - Collect customer information</li>
-                                    <li>👥 Leads - Track and convert prospects</li>
-                                    <li>🤖 Automations - Save time with automated workflows</li>
-                                    <li>📊 Analytics - Monitor your business performance</li>
-                                </ul>
-                                <p>To get started, complete your business profile and set up your first services.</p>
-                                <p style="text-align: center;">
-                                    <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/onboarding" class="button">Complete Setup</a>
-                                </p>
-                                <p>If you have any questions or need help, feel free to reach out to our support team.</p>
-                                <p>Best regards,<br>The Veltro Team</p>
-                            </div>
-                            <div class="footer">
-                                <p>This email was sent to ${email}</p>
-                                <p>© ${new Date().getFullYear()} Veltro. All rights reserved.</p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                `;
-
-                await sendEmail({
-                    to: email,
-                    subject: 'Welcome to Veltro - Let\'s Get Started! 🚀',
-                    html: welcomeEmailHtml,
-                });
-
-                console.log('✅ Welcome email sent to:', email);
-            } catch (emailError) {
-                // Don't fail registration if email fails
-                console.error('❌ Failed to send welcome email:', emailError.message);
-            }
-        }
-
+        // Send response immediately
         res.status(201).json({
             success: true,
             data: {
@@ -175,6 +112,72 @@ exports.register = async (req, res, next) => {
                 refreshToken,
             },
         });
+
+        // Send welcome email asynchronously (don't block response)
+        if (userRole === 'owner') {
+            // Fire and forget - send email in background
+            setImmediate(async () => {
+                try {
+                    const { sendEmail } = require('../services/email.service');
+                    
+                    const welcomeEmailHtml = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <style>
+                                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+                                .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+                                .button { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+                                .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <div class="header">
+                                    <h1>Welcome to Veltro! 🎉</h1>
+                                </div>
+                                <div class="content">
+                                    <p>Hi ${name},</p>
+                                    <p>Thank you for joining Veltro! We're excited to have you on board.</p>
+                                    <p>Veltro is your all-in-one platform for managing your business operations:</p>
+                                    <ul>
+                                        <li>📧 Inbox - Manage customer communications</li>
+                                        <li>📅 Bookings - Schedule and track appointments</li>
+                                        <li>📝 Forms - Collect customer information</li>
+                                        <li>👥 Leads - Track and convert prospects</li>
+                                        <li>🤖 Automations - Save time with automated workflows</li>
+                                        <li>📊 Analytics - Monitor your business performance</li>
+                                    </ul>
+                                    <p>To get started, complete your business profile and set up your first services.</p>
+                                    <p style="text-align: center;">
+                                        <a href="${process.env.CLIENT_URL || 'http://localhost:3000'}/onboarding" class="button">Complete Setup</a>
+                                    </p>
+                                    <p>If you have any questions or need help, feel free to reach out to our support team.</p>
+                                    <p>Best regards,<br>The Veltro Team</p>
+                                </div>
+                                <div class="footer">
+                                    <p>This email was sent to ${email}</p>
+                                    <p>© ${new Date().getFullYear()} Veltro. All rights reserved.</p>
+                                </div>
+                            </div>
+                        </body>
+                        </html>
+                    `;
+
+                    await sendEmail({
+                        to: email,
+                        subject: 'Welcome to Veltro - Let\'s Get Started! 🚀',
+                        html: welcomeEmailHtml,
+                    });
+
+                    console.log('✅ Welcome email sent to:', email);
+                } catch (emailError) {
+                    console.error('❌ Failed to send welcome email:', emailError.message);
+                }
+            });
+        }
     } catch (error) {
         next(error);
     }
