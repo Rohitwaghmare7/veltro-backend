@@ -1,11 +1,67 @@
 const nodemailer = require('nodemailer');
 const sgMail = require('@sendgrid/mail');
+const { google } = require('googleapis');
+const Business = require('../models/Business');
 const AutomationLog = require('../models/AutomationLog');
 
 // Initialize SendGrid if API key is available
 if (process.env.SENDGRID_API_KEY) {
     sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
+
+/**
+ * Send email via Gmail API using business's connected Gmail account
+ */
+const sendViaGmailAPI = async (businessId, to, subject, html) => {
+    try {
+        const business = await Business.findById(businessId);
+        
+        if (!business?.integrations?.gmail?.accessToken) {
+            throw new Error('Gmail not connected for this business');
+        }
+
+        const oauth2Client = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_REDIRECT_URI
+        );
+
+        oauth2Client.setCredentials({
+            access_token: business.integrations.gmail.accessToken,
+            refresh_token: business.integrations.gmail.refreshToken,
+        });
+
+        const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+        // Create email message
+        const message = [
+            `To: ${to}`,
+            `Subject: ${subject}`,
+            'MIME-Version: 1.0',
+            'Content-Type: text/html; charset=utf-8',
+            '',
+            html
+        ].join('\n');
+
+        const encodedMessage = Buffer.from(message)
+            .toString('base64')
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+
+        const response = await gmail.users.messages.send({
+            userId: 'me',
+            requestBody: {
+                raw: encodedMessage,
+            },
+        });
+
+        return { success: true, messageId: response.data.id };
+    } catch (error) {
+        console.error('Gmail API send failed:', error.message);
+        throw error;
+    }
+};
 
 // Create reusable transporter
 const createTransporter = () => {
@@ -82,6 +138,7 @@ const wrapEmailTemplate = (content, businessName) => {
 const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) => {
     try {
         // Try SendGrid API first if API key is available
+        let messageId = null;
         if (process.env.SENDGRID_API_KEY) {
             const msg = {
                 to,
@@ -93,7 +150,8 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) 
                 html,
             };
 
-            await sgMail.send(msg);
+            const response = await sgMail.send(msg);
+            messageId = response[0]?.headers?.['x-message-id'] || 'sendgrid-api';
             console.log('✅ Email sent via SendGrid API to:', to);
         } else {
             // Fallback to SMTP
@@ -106,7 +164,8 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) 
                 html,
             };
 
-            await transporter.sendMail(mailOptions);
+            const info = await transporter.sendMail(mailOptions);
+            messageId = info.messageId;
             console.log('✅ Email sent via SMTP to:', to);
         }
 
@@ -120,14 +179,14 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) 
                 type: 'email',
                 success: true,
                 metadata: {
-                    messageId: info.messageId,
+                    messageId,
                     to,
                     subject,
                 },
             });
         }
 
-        console.log('✅ Email sent:', info.messageId);
+        console.log('✅ Email sent successfully');
         return { success: true, messageId: info.messageId };
     } catch (error) {
         console.error('❌ Email send failed:', error.message);
