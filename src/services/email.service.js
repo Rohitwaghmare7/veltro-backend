@@ -1,5 +1,11 @@
 const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
 const AutomationLog = require('../models/AutomationLog');
+
+// Initialize SendGrid if API key is available
+if (process.env.SENDGRID_API_KEY) {
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
 // Create reusable transporter
 const createTransporter = () => {
@@ -71,19 +77,38 @@ const wrapEmailTemplate = (content, businessName) => {
 
 /**
  * Send email with error handling and logging
+ * Uses SendGrid API if available, falls back to SMTP
  */
 const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) => {
     try {
-        const transporter = createTransporter();
+        // Try SendGrid API first if API key is available
+        if (process.env.SENDGRID_API_KEY) {
+            const msg = {
+                to,
+                from: {
+                    email: process.env.SMTP_FROM_EMAIL,
+                    name: process.env.SMTP_FROM_NAME || 'Veltro'
+                },
+                subject,
+                html,
+            };
 
-        const mailOptions = {
-            from: `${process.env.SMTP_FROM_NAME || 'Veltro'} <${process.env.SMTP_FROM_EMAIL}>`,
-            to,
-            subject,
-            html,
-        };
+            await sgMail.send(msg);
+            console.log('✅ Email sent via SendGrid API to:', to);
+        } else {
+            // Fallback to SMTP
+            const transporter = createTransporter();
 
-        const info = await transporter.sendMail(mailOptions);
+            const mailOptions = {
+                from: `${process.env.SMTP_FROM_NAME || 'Veltro'} <${process.env.SMTP_FROM_EMAIL}>`,
+                to,
+                subject,
+                html,
+            };
+
+            await transporter.sendMail(mailOptions);
+            console.log('✅ Email sent via SMTP to:', to);
+        }
 
         // Log successful automation
         if (trigger && businessId) {
