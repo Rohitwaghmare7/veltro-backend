@@ -11,6 +11,12 @@ const createTransporter = () => {
             user: process.env.SMTP_USER || process.env.SMTP_FROM_EMAIL,
             pass: process.env.SMTP_PASS || process.env.SMTP_PASSWORD,
         },
+        // Force IPv4 to avoid IPv6 connectivity issues on some hosting platforms
+        family: 4,
+        // Connection timeout
+        connectionTimeout: 10000,
+        // Socket timeout
+        socketTimeout: 10000,
     });
 };
 
