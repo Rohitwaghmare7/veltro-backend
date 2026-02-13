@@ -9,6 +9,7 @@ const {
     getContactBookings,
     getContactSubmissions,
     resumeAutomation,
+    uploadAttachments,
 } = require('../controllers/inboxController');
 const { protect } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/role');
@@ -22,8 +23,8 @@ router.get('/conversations', requirePermission('inbox'), getConversations);
 // Get messages for a conversation
 router.get('/conversations/:id/messages', requirePermission('inbox'), getMessages);
 
-// Send a reply
-router.post('/conversations/:id/reply', requirePermission('inbox'), sendReply);
+// Send a reply (with optional attachments)
+router.post('/conversations/:id/reply', requirePermission('inbox'), uploadAttachments, sendReply);
 
 // Mark conversation as resolved
 router.patch('/conversations/:id/resolve', requirePermission('inbox'), resolveConversation);

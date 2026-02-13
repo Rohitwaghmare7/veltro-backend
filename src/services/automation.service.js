@@ -1,6 +1,7 @@
 const AutomationLog = require('../models/AutomationLog');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const Business = require('../models/Business');
 const {
     sendEmail,
     welcomeEmail,
@@ -9,6 +10,79 @@ const {
     formReminder,
     inventoryAlert,
 } = require('./email.service');
+const gmailService = require('./gmail.service');
+
+/**
+ * Send email using Gmail if connected, otherwise use SMTP
+ */
+const sendEmailSmart = async ({ businessId, to, subject, html, trigger, contactId }) => {
+    try {
+        // Check if Gmail is connected
+        const business = await Business.findById(businessId);
+        
+        if (business?.integrations?.gmail?.connected) {
+            console.log('📧 [AUTOMATION] Using Gmail to send email');
+            try {
+                const result = await gmailService.sendEmail(businessId, {
+                    to,
+                    subject,
+                    body: html,
+                });
+                
+                console.log('✅ [AUTOMATION] Sent via Gmail successfully');
+                
+                // Log to AutomationLog
+                await AutomationLog.create({
+                    trigger,
+                    businessId,
+                    contactId,
+                    firedAt: new Date(),
+                    type: 'email',
+                    success: true,
+                    metadata: {
+                        messageId: result.id,
+                        to,
+                        subject,
+                        via: 'gmail',
+                    },
+                });
+                
+                return { success: true, messageId: result.id, via: 'gmail' };
+            } catch (gmailError) {
+                console.error('❌ [AUTOMATION] Gmail send failed, falling back to SMTP:', gmailError.message);
+                // Fall back to SMTP if Gmail fails
+            }
+        }
+        
+        // Use SMTP (either Gmail not connected or Gmail failed)
+        console.log('📧 [AUTOMATION] Using SMTP to send email');
+        const result = await sendEmail({
+            to,
+            subject,
+            html,
+            businessId,
+            trigger,
+            contactId,
+        });
+        
+        return { ...result, via: 'smtp' };
+    } catch (error) {
+        console.error('❌ [AUTOMATION] All email methods failed:', error.message);
+        
+        // Log failure
+        await AutomationLog.create({
+            trigger,
+            businessId,
+            contactId,
+            firedAt: new Date(),
+            type: 'email',
+            success: false,
+            error: error.message,
+        });
+        
+        return { success: false, error: error.message };
+    }
+};
 
 /**
  * Automation Trigger Constants
@@ -228,7 +302,7 @@ const handleBookingCreated = async (payload) => {
                 html = template.html;
             }
 
-            const result = await sendEmail({
+            const result = await sendEmailSmart({
                 to: contact.email,
                 subject,
                 html,

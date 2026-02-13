@@ -46,6 +46,11 @@ const conversationSchema = new mongoose.Schema(
         summary: {
             type: String,
         },
+        metadata: {
+            gmailThreadId: String,            // Gmail thread ID
+            subject: String,                  // Thread subject
+            participants: [String]            // All email addresses in thread
+        },
     },
     {
         timestamps: true,
@@ -55,5 +60,7 @@ const conversationSchema = new mongoose.Schema(
 // Compound index for efficient queries
 conversationSchema.index({ businessId: 1, status: 1, lastMessageAt: -1 });
 conversationSchema.index({ contactId: 1 });
+conversationSchema.index({ 'metadata.gmailThreadId': 1 });
+conversationSchema.index({ businessId: 1, 'metadata.gmailThreadId': 1 });
 
 module.exports = mongoose.model('Conversation', conversationSchema);

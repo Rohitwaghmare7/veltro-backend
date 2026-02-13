@@ -150,6 +150,15 @@ exports.createBooking = async (req, res, next) => {
             });
         }
 
+        // Send linked forms if auto-send is enabled
+        const { sendLinkedForms } = require('../services/formSending.service');
+        await sendLinkedForms({
+            businessId: req.businessId,
+            booking,
+            contact,
+            business,
+        });
+
         res.status(201).json({ success: true, data: booking });
     } catch (error) {
         next(error);
@@ -523,6 +532,15 @@ exports.createPublicBooking = async (req, res, next) => {
                 business,
             });
         }
+
+        // Send linked forms if auto-send is enabled
+        const { sendLinkedForms } = require('../services/formSending.service');
+        await sendLinkedForms({
+            businessId: business._id,
+            booking,
+            contact,
+            business,
+        });
 
         res.status(201).json({ 
             success: true, 

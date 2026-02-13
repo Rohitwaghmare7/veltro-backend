@@ -23,7 +23,7 @@ const contactSchema = new mongoose.Schema(
         },
         source: {
             type: String,
-            enum: ['contact_form', 'booking', 'manual', 'form_submission'],
+            enum: ['contact_form', 'booking', 'manual', 'form_submission', 'gmail_import'],
             default: 'manual',
         },
         status: {

@@ -266,6 +266,7 @@ exports.getMyBusinesses = async (req, res, next) => {
             businesses.push({
                 _id: biz._id,
                 name: biz.name,
+                bookingSlug: biz.bookingSlug,
                 role: 'owner'
             });
         });
@@ -279,6 +280,7 @@ exports.getMyBusinesses = async (req, res, next) => {
                 businesses.push({
                     _id: record.businessId._id,
                     name: record.businessId.name,
+                    bookingSlug: record.businessId.bookingSlug,
                     role: 'staff'
                 });
             }

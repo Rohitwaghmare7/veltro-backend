@@ -1,7 +1,27 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const Contact = require('../models/Contact');
+const Business = require('../models/Business');
 const { sendEmail } = require('../services/email.service');
+const multer = require('multer');
+const path = require('path');
+
+// Configure multer for file uploads
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 25 * 1024 * 1024, // 25MB per file
+        files: 10 // Max 10 files
+    },
+    fileFilter: (req, file, cb) => {
+        // Allow all file types
+        cb(null, true);
+    }
+});
+
+// Export upload middleware
+exports.uploadAttachments = upload.array('attachments', 10);
 
 /**
  * @desc    Get all conversations for a business
@@ -128,7 +148,8 @@ exports.sendReply = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { content, channel = 'email' } = req.body;
-        const businessId = req.businessId; // Use req.businessId set by middleware
+        const businessId = req.businessId;
+        const attachments = req.files || []; // Get uploaded files
 
         if (!content || content.trim() === '') {
             return res.status(400).json({
@@ -150,6 +171,13 @@ exports.sendReply = async (req, res, next) => {
             });
         }
 
+        // Prepare attachment metadata
+        const attachmentMetadata = attachments.map(file => ({
+            filename: file.originalname,
+            mimeType: file.mimetype,
+            size: file.size
+        }));
+
         // Create message
         const message = await Message.create({
             conversationId: id,
@@ -158,6 +186,9 @@ exports.sendReply = async (req, res, next) => {
             content,
             channel,
             sentAt: new Date(),
+            metadata: {
+                attachments: attachmentMetadata.length > 0 ? attachmentMetadata : undefined
+            }
         });
 
         // Pause automation for this conversation (staff replied)
@@ -176,20 +207,52 @@ exports.sendReply = async (req, res, next) => {
             $set: { lastMessageAt: new Date() },
         });
 
-        // Send email if channel is email
-        if (channel === 'email' && conversation.contactId.email) {
-            await sendEmail({
-                to: conversation.contactId.email,
-                subject: `Message from ${req.user.name}`,
-                html: `
-                    <p>${content.replace(/\n/g, '<br>')}</p>
-                    <hr>
-                    <p><small>This message was sent from ${req.user.name}</small></p>
-                `,
-            });
-        }
+        // Get business for integration check
+        const business = await Business.findById(businessId);
 
-        // TODO: Send SMS if channel is sms
+        // Send email
+        if (channel === 'email' && conversation.contactId.email) {
+            if (business.integrations?.gmail?.connected && conversation.metadata?.gmailThreadId) {
+                // Use Gmail API with attachments
+                const gmailService = require('../services/gmail.service');
+                
+                // Convert attachments to base64 for Gmail API
+                const gmailAttachments = attachments.map(file => ({
+                    filename: file.originalname,
+                    mimeType: file.mimetype,
+                    size: file.size,
+                    data: file.buffer.toString('base64')
+                }));
+
+                await gmailService.sendEmail(businessId, {
+                    to: conversation.contactId.email,
+                    subject: conversation.metadata?.subject ? `Re: ${conversation.metadata.subject}` : `Message from ${req.user.name}`,
+                    body: content.replace(/\n/g, '<br>'),
+                    threadId: conversation.metadata.gmailThreadId,
+                    inReplyTo: conversation.metadata.inReplyTo,
+                    references: conversation.metadata.references,
+                    attachments: gmailAttachments
+                });
+            } else {
+                // Use default SMTP service with attachments
+                const emailAttachments = attachments.map(file => ({
+                    filename: file.originalname,
+                    content: file.buffer,
+                    contentType: file.mimetype
+                }));
+
+                await sendEmail({
+                    to: conversation.contactId.email,
+                    subject: `Message from ${req.user.name}`,
+                    html: `
+                        <p>${content.replace(/\n/g, '<br>')}</p>
+                        <hr>
+                        <p><small>This message was sent from ${req.user.name}</small></p>
+                    `,
+                    attachments: emailAttachments
+                });
+            }
+        }
 
         // Emit socket event for real-time update
         if (req.io) {
@@ -204,6 +267,19 @@ exports.sendReply = async (req, res, next) => {
             data: message,
         });
     } catch (error) {
+        // Handle multer errors
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({
+                success: false,
+                message: 'File size exceeds 25MB limit'
+            });
+        }
+        if (error.code === 'LIMIT_FILE_COUNT') {
+            return res.status(400).json({
+                success: false,
+                message: 'Maximum 10 files allowed'
+            });
+        }
         next(error);
     }
 };

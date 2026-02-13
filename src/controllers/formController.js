@@ -38,7 +38,16 @@ exports.getFormById = async (req, res, next) => {
 // @access  Private
 exports.createForm = async (req, res, next) => {
     try {
-        const { title, description, fields, isActive } = req.body;
+        const { 
+            title, 
+            description, 
+            fields, 
+            isActive,
+            linkedServices,
+            isRequiredForBooking,
+            autoSendAfterBooking,
+            sendDelay
+        } = req.body;
 
         const form = await Form.create({
             businessId: req.businessId,
@@ -46,6 +55,10 @@ exports.createForm = async (req, res, next) => {
             description,
             fields,
             isActive: isActive !== undefined ? isActive : true,
+            linkedServices: linkedServices || [],
+            isRequiredForBooking: isRequiredForBooking || false,
+            autoSendAfterBooking: autoSendAfterBooking || false,
+            sendDelay: sendDelay || 0,
         });
 
         res.status(201).json({ success: true, data: form });

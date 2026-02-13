@@ -133,6 +133,22 @@ const businessSchema = new mongoose.Schema(
                 lastSync: Date,
                 error: String,
             },
+            gmail: {
+                connected: { type: Boolean, default: false },
+                email: String,                    // Business Gmail address
+                accessToken: String,              // Encrypted
+                refreshToken: String,             // Encrypted
+                tokenExpiry: Date,
+                lastSync: Date,
+                historyId: String,                // For incremental sync
+                watchExpiration: Date,            // Pub/Sub watch expiry
+                syncStatus: {
+                    type: String,
+                    enum: ['idle', 'syncing', 'error'],
+                    default: 'idle'
+                },
+                syncError: String
+            },
             googleCalendar: {
                 connected: { type: Boolean, default: false },
                 accessToken: String,
