@@ -15,8 +15,12 @@ const createTransporter = () => {
         family: 4,
         // Connection timeout
         connectionTimeout: 10000,
-        // Socket timeout
+        // Socket timeout  
         socketTimeout: 10000,
+        // Ignore TLS errors (not recommended for production, but helps with connectivity)
+        tls: {
+            rejectUnauthorized: false
+        }
     });
 };
 

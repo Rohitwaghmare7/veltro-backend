@@ -30,6 +30,9 @@ const testNotificationRoutes = require('./src/routes/test-notifications');
 const app = express();
 const server = http.createServer(app);
 
+// Trust proxy - Required for Render and other reverse proxies
+app.set('trust proxy', 1);
+
 // Connect to MongoDB
 connectDB();
 
