@@ -224,14 +224,37 @@ const handleNewContact = async (payload) => {
                 html = template.html;
             }
 
-            const result = await sendEmail({
-                to: contact.email,
-                subject,
-                html,
-                businessId,
-                trigger: TRIGGERS.NEW_CONTACT,
-                contactId: contact._id,
-            });
+            console.log('📧 Sending welcome email to:', contact.email);
+            console.log('📧 Gmail connected:', business.integrations?.gmail?.connected);
+
+            let result;
+            // Use Gmail API if connected, otherwise SMTP
+            if (business.integrations?.gmail?.connected) {
+                console.log('📧 Using Gmail API for welcome email');
+                const gmailService = require('./gmail.service');
+                try {
+                    await gmailService.sendEmail(businessId, {
+                        to: contact.email,
+                        subject,
+                        body: html
+                    });
+                    result = { success: true };
+                    console.log('✅ Welcome email sent via Gmail API');
+                } catch (error) {
+                    console.error('❌ Gmail API send failed:', error.message);
+                    result = { success: false, error: error.message };
+                }
+            } else {
+                console.log('📧 Using SMTP for welcome email');
+                result = await sendEmail({
+                    to: contact.email,
+                    subject,
+                    html,
+                    businessId,
+                    trigger: TRIGGERS.NEW_CONTACT,
+                    contactId: contact._id,
+                });
+            }
 
             // Create message record
             if (result.success) {

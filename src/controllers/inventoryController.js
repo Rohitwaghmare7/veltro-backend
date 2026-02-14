@@ -45,6 +45,7 @@ exports.addItem = async (req, res, next) => {
 exports.updateItem = async (req, res, next) => {
     try {
         const { fireAutomation, TRIGGERS } = require('../services/automation.service');
+        const { createNotification } = require('./notificationController');
         const Business = require('../models/Business');
         const User = require('../models/User');
 
@@ -90,6 +91,19 @@ exports.updateItem = async (req, res, next) => {
                     business,
                     ownerEmail: owner.email,
                 });
+                
+                // Create notification for low stock
+                try {
+                    await createNotification(req.businessId, business.owner, {
+                        type: 'system',
+                        title: 'Low Stock Alert',
+                        message: `${item.name} is running low (${currentQty} ${item.unit} remaining)`,
+                        link: '/dashboard/inventory',
+                        metadata: { inventoryId: item._id }
+                    });
+                } catch (notifError) {
+                    console.error('Failed to create notification:', notifError);
+                }
                 
                 // Mark alert as sent
                 item.alertSent = true;

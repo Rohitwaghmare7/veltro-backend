@@ -151,7 +151,14 @@ exports.sendReply = async (req, res, next) => {
         const businessId = req.businessId;
         const attachments = req.files || []; // Get uploaded files
 
+        console.log('📧 ========== SEND REPLY CALLED ==========');
+        console.log('📧 Conversation ID:', id);
+        console.log('📧 Content:', content);
+        console.log('📧 Channel:', channel);
+        console.log('📧 Business ID:', businessId);
+
         if (!content || content.trim() === '') {
+            console.log('❌ Empty content');
             return res.status(400).json({
                 success: false,
                 message: 'Message content is required',
@@ -165,11 +172,15 @@ exports.sendReply = async (req, res, next) => {
         }).populate('contactId');
 
         if (!conversation) {
+            console.log('❌ Conversation not found');
             return res.status(404).json({
                 success: false,
                 message: 'Conversation not found',
             });
         }
+
+        console.log('✅ Conversation found');
+        console.log('✅ Contact email:', conversation.contactId.email);
 
         // Prepare attachment metadata
         const attachmentMetadata = attachments.map(file => ({
@@ -210,10 +221,24 @@ exports.sendReply = async (req, res, next) => {
         // Get business for integration check
         const business = await Business.findById(businessId);
 
-        // Send email
+        console.log('📧 sendReply - Attempting to send email');
+        console.log('📧 Channel:', channel);
+        console.log('📧 Contact email:', conversation.contactId.email);
+        console.log('📧 Gmail connected:', business.integrations?.gmail?.connected);
+        console.log('📧 Gmail thread ID:', conversation.metadata?.gmailThreadId);
+
+        // Send email - use Gmail API if connected and has thread, otherwise SMTP
         if (channel === 'email' && conversation.contactId.email) {
+            // Prepare email attachments
+            const emailAttachments = attachments.map(file => ({
+                filename: file.originalname,
+                content: file.buffer,
+                contentType: file.mimetype
+            }));
+
+            // Check if Gmail integration is available and has thread ID
             if (business.integrations?.gmail?.connected && conversation.metadata?.gmailThreadId) {
-                // Use Gmail API with attachments
+                console.log('📧 Using Gmail API for reply');
                 const gmailService = require('../services/gmail.service');
                 
                 // Convert attachments to base64 for Gmail API
@@ -224,34 +249,47 @@ exports.sendReply = async (req, res, next) => {
                     data: file.buffer.toString('base64')
                 }));
 
-                await gmailService.sendEmail(businessId, {
-                    to: conversation.contactId.email,
-                    subject: conversation.metadata?.subject ? `Re: ${conversation.metadata.subject}` : `Message from ${req.user.name}`,
-                    body: content.replace(/\n/g, '<br>'),
-                    threadId: conversation.metadata.gmailThreadId,
-                    inReplyTo: conversation.metadata.inReplyTo,
-                    references: conversation.metadata.references,
-                    attachments: gmailAttachments
-                });
+                try {
+                    await gmailService.sendEmail(businessId, {
+                        to: conversation.contactId.email,
+                        subject: `Message from ${business.name}`,
+                        body: content.replace(/\n/g, '<br>'),
+                        threadId: conversation.metadata.gmailThreadId,
+                        attachments: gmailAttachments.length > 0 ? gmailAttachments : undefined
+                    });
+                    console.log('✅ Reply sent via Gmail API');
+                } catch (emailError) {
+                    console.error('❌ Gmail API send failed:', emailError.message);
+                    // Don't throw - message is already saved
+                    console.log('⚠️  Email failed but message saved in conversation');
+                }
             } else {
-                // Use default SMTP service with attachments
-                const emailAttachments = attachments.map(file => ({
-                    filename: file.originalname,
-                    content: file.buffer,
-                    contentType: file.mimetype
-                }));
-
-                await sendEmail({
-                    to: conversation.contactId.email,
-                    subject: `Message from ${req.user.name}`,
-                    html: `
-                        <p>${content.replace(/\n/g, '<br>')}</p>
-                        <hr>
-                        <p><small>This message was sent from ${req.user.name}</small></p>
-                    `,
-                    attachments: emailAttachments
-                });
+                console.log('📧 Using SMTP for reply (no Gmail thread or not connected)');
+                try {
+                    const result = await sendEmail({
+                        to: conversation.contactId.email,
+                        subject: `Message from ${business.name}`,
+                        html: `
+                            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                                <h2 style="color: #333;">Message from ${business.name}</h2>
+                                <p style="color: #666; line-height: 1.6; white-space: pre-wrap;">${content}</p>
+                                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                                <p style="color: #999; font-size: 12px;">
+                                    This message was sent by ${req.user.name} from ${business.name}
+                                </p>
+                            </div>
+                        `,
+                        attachments: emailAttachments.length > 0 ? emailAttachments : undefined
+                    });
+                    console.log('✅ Reply email sent via SMTP:', result);
+                } catch (emailError) {
+                    console.error('❌ SMTP send failed:', emailError.message);
+                    // Don't throw error - message is already saved in database
+                    console.log('⚠️  Email failed but message saved in conversation');
+                }
             }
+        } else {
+            console.log('⚠️  Email not sent - channel:', channel, 'contact email:', conversation.contactId.email);
         }
 
         // Emit socket event for real-time update
@@ -438,6 +476,336 @@ exports.resumeAutomation = async (req, res, next) => {
         res.status(200).json({
             success: true,
             data: conversation,
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Send a form to a contact via email
+ * @route   POST /api/inbox/send-form
+ * @access  Private (Owner + Staff with inbox permission)
+ */
+exports.sendFormToContact = async (req, res, next) => {
+    try {
+        const { conversationId, contactEmail, contactName, formId } = req.body;
+        const businessId = req.businessId;
+
+        console.log('📧 sendFormToContact called with:', { conversationId, contactEmail, contactName, formId, businessId });
+
+        if (!conversationId || !contactEmail || !formId) {
+            console.log('❌ Missing required fields');
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields',
+            });
+        }
+
+        // Verify conversation belongs to business
+        const conversation = await Conversation.findOne({
+            _id: conversationId,
+            businessId,
+        });
+
+        if (!conversation) {
+            console.log('❌ Conversation not found:', conversationId);
+            return res.status(404).json({
+                success: false,
+                message: 'Conversation not found',
+            });
+        }
+
+        console.log('✅ Conversation found:', conversation._id);
+
+        // Get form details
+        const Form = require('../models/Form');
+        const form = await Form.findOne({ _id: formId, businessId });
+
+        if (!form) {
+            console.log('❌ Form not found:', formId);
+            return res.status(404).json({
+                success: false,
+                message: 'Form not found',
+            });
+        }
+
+        console.log('✅ Form found:', form.title);
+
+        // Get business details
+        const business = await Business.findById(businessId);
+        console.log('✅ Business found:', business.name);
+
+        // Generate form link
+        const formUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/form/${formId}`;
+
+        // Create message in conversation
+        const messageContent = `Form sent: ${form.title}\n\nLink: ${formUrl}`;
+        
+        const message = await Message.create({
+            conversationId,
+            direction: 'outbound',
+            type: 'automated',
+            content: messageContent,
+            channel: 'email',
+            sentAt: new Date(),
+            metadata: {
+                subject: `${form.title} - ${business.name}`,
+                from: business.email || process.env.SMTP_FROM_EMAIL,
+                to: contactEmail,
+            },
+        });
+
+        console.log('✅ Message created in conversation:', message._id);
+
+        // Update conversation last message time
+        await Conversation.findByIdAndUpdate(conversationId, {
+            $set: { lastMessageAt: new Date() },
+        });
+
+        console.log('✅ Conversation updated');
+
+        // Send email with form link
+        const emailContent = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #333;">Hi ${contactName || 'there'},</h2>
+                <p style="color: #666; line-height: 1.6;">
+                    ${business.name} has sent you a form to complete.
+                </p>
+                <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h3 style="margin-top: 0; color: #333;">${form.title}</h3>
+                    ${form.description ? `<p style="color: #666;">${form.description}</p>` : ''}
+                </div>
+                <a href="${formUrl}" 
+                   style="display: inline-block; background: #7c3aed; color: white; padding: 12px 30px; 
+                          text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0;">
+                    Complete Form
+                </a>
+                <p style="color: #999; font-size: 14px; margin-top: 30px;">
+                    If the button doesn't work, copy and paste this link into your browser:<br>
+                    <a href="${formUrl}" style="color: #7c3aed;">${formUrl}</a>
+                </p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    This email was sent by ${business.name}
+                </p>
+            </div>
+        `;
+
+        console.log('📧 Attempting to send form email to:', contactEmail);
+        console.log('📧 Gmail connected:', business.integrations?.gmail?.connected);
+        console.log('📧 Gmail thread ID:', conversation.metadata?.gmailThreadId);
+
+        // Check if Gmail integration is available
+        if (business.integrations?.gmail?.connected && conversation.metadata?.gmailThreadId) {
+            console.log('📧 Using Gmail API to send form');
+            const gmailService = require('../services/gmail.service');
+            try {
+                await gmailService.sendEmail(businessId, {
+                    to: contactEmail,
+                    subject: `${form.title} - ${business.name}`,
+                    body: emailContent,
+                    threadId: conversation.metadata.gmailThreadId,
+                });
+                console.log('✅ Form email sent via Gmail API');
+            } catch (emailError) {
+                console.error('❌ Gmail API send failed:', emailError.message);
+                throw emailError;
+            }
+        } else {
+            console.log('📧 Using SMTP to send form');
+            try {
+                const result = await sendEmail({
+                    to: contactEmail,
+                    subject: `${form.title} - ${business.name}`,
+                    html: emailContent,
+                });
+                console.log('✅ Form email sent via SMTP:', result);
+            } catch (emailError) {
+                console.error('❌ SMTP send failed:', emailError.message);
+                throw emailError;
+            }
+        }
+
+        // Emit socket event for real-time update
+        if (req.io) {
+            req.io.to(`business_${businessId}`).emit('conversation_update', {
+                conversationId,
+            });
+        }
+
+        console.log('✅ sendFormToContact completed successfully');
+
+        res.status(200).json({
+            success: true,
+            message: 'Form sent successfully',
+        });
+    } catch (error) {
+        console.error('❌ sendFormToContact error:', error);
+        next(error);
+    }
+};
+
+
+/**
+ * @desc    Create a new conversation with a contact
+ * @route   POST /api/inbox/create-conversation
+ * @access  Private (Owner + Staff with inbox permission)
+ */
+exports.createConversation = async (req, res, next) => {
+    try {
+        const { email, name } = req.body;
+        const businessId = req.businessId;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email is required',
+            });
+        }
+
+        // Find or create contact
+        let contact = await Contact.findOne({
+            businessId,
+            email: email.toLowerCase()
+        });
+
+        if (!contact) {
+            contact = await Contact.create({
+                businessId,
+                email: email.toLowerCase(),
+                name: name || email.split('@')[0],
+                source: 'manual',
+                status: 'new'
+            });
+        }
+
+        // Check if conversation already exists
+        let conversation = await Conversation.findOne({
+            businessId,
+            contactId: contact._id
+        }).populate('contactId', 'name email phone notes tags source status');
+
+        if (conversation) {
+            return res.status(200).json({
+                success: true,
+                message: 'Conversation already exists',
+                data: { conversation, isNew: false }
+            });
+        }
+
+        // Create new conversation
+        conversation = await Conversation.create({
+            businessId,
+            contactId: contact._id,
+            channel: 'email',
+            status: 'open',
+            lastMessageAt: new Date()
+        });
+
+        // Create initial system message
+        await Message.create({
+            conversationId: conversation._id,
+            direction: 'outbound',
+            type: 'automated',
+            content: `Conversation started with ${contact.name}`,
+            channel: 'email',
+            sentAt: new Date(),
+            metadata: {
+                isSystemMessage: true
+            }
+        });
+
+        // Populate contact details
+        await conversation.populate('contactId', 'name email phone notes tags source status');
+
+        res.status(201).json({
+            success: true,
+            message: 'Conversation created successfully',
+            data: { conversation, isNew: true }
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Delete a conversation and its messages
+ * @route   DELETE /api/inbox/conversations/:id
+ * @access  Private (Owner + Staff with inbox permission)
+ */
+exports.deleteConversation = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const businessId = req.businessId;
+
+        // Verify conversation belongs to business
+        const conversation = await Conversation.findOne({
+            _id: id,
+            businessId,
+        });
+
+        if (!conversation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conversation not found',
+            });
+        }
+
+        // Delete all messages in the conversation
+        await Message.deleteMany({ conversationId: id });
+
+        // Delete the conversation
+        await Conversation.findByIdAndDelete(id);
+
+        res.status(200).json({
+            success: true,
+            message: 'Conversation deleted successfully',
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * @desc    Delete multiple conversations
+ * @route   POST /api/inbox/conversations/bulk-delete
+ * @access  Private (Owner + Staff with inbox permission)
+ */
+exports.bulkDeleteConversations = async (req, res, next) => {
+    try {
+        const { conversationIds } = req.body;
+        const businessId = req.businessId;
+
+        if (!conversationIds || !Array.isArray(conversationIds) || conversationIds.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Conversation IDs are required',
+            });
+        }
+
+        // Verify all conversations belong to business
+        const conversations = await Conversation.find({
+            _id: { $in: conversationIds },
+            businessId,
+        });
+
+        if (conversations.length !== conversationIds.length) {
+            return res.status(404).json({
+                success: false,
+                message: 'Some conversations not found',
+            });
+        }
+
+        // Delete all messages for these conversations
+        await Message.deleteMany({ conversationId: { $in: conversationIds } });
+
+        // Delete the conversations
+        await Conversation.deleteMany({ _id: { $in: conversationIds } });
+
+        res.status(200).json({
+            success: true,
+            message: `${conversationIds.length} conversation(s) deleted successfully`,
         });
     } catch (error) {
         next(error);

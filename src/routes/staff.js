@@ -11,7 +11,8 @@ const {
     acceptInvite,
     getStaffMe,
     getMyBusinesses,
-    getInviteInfo
+    getInviteInfo,
+    resendInvite
 } = require('../controllers/staffController');
 
 // Public route for fetching invite info (for registration pre-fill)
@@ -47,5 +48,6 @@ router.route('/:id')
 
 router.put('/:id/deactivate', deactivateStaff);
 router.put('/:id/reactivate', reactivateStaff);
+router.post('/:id/resend-invite', resendInvite);
 
 module.exports = router;

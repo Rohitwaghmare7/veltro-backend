@@ -234,7 +234,7 @@ exports.getBookingForms = async (req, res, next) => {
 // @access  Public
 exports.getPublicForm = async (req, res, next) => {
     try {
-        const form = await Form.findById(req.params.id);
+        const form = await Form.findById(req.params.id).populate('businessId', 'name email phone address website');
 
         if (!form || !form.isActive) {
             return res.status(404).json({ success: false, message: 'Form not found or inactive' });
@@ -246,6 +246,13 @@ exports.getPublicForm = async (req, res, next) => {
             title: form.title,
             description: form.description,
             fields: form.fields,
+            business: form.businessId ? {
+                name: form.businessId.name,
+                email: form.businessId.email,
+                phone: form.businessId.phone,
+                address: form.businessId.address,
+                website: form.businessId.website
+            } : null
         };
 
         res.json({ success: true, data: publicForm });
@@ -279,98 +286,124 @@ exports.submitForm = async (req, res, next) => {
             });
         }
 
-        // Try to match submission to existing contact or create new one if email/phone provided
-        let contactId = null;
+        // MANDATORY: Extract email from form submission
         let emailField = form.fields.find(f => f.type === 'email');
-        let phoneField = form.fields.find(f => f.type === 'phone');
-        let nameField = form.fields.find(f => f.label.toLowerCase().includes('name')); // Heuristic
-
         const email = emailField ? data[emailField.id] : null;
-        const phone = phoneField ? data[phoneField.id] : null;
-        const name = nameField ? data[nameField.id] : 'Form Submission';
 
-        if (email || phone) {
-            // Find existing contact
-            let contact = await Contact.findOne({
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email is required to submit this form'
+            });
+        }
+
+        // Extract other contact information
+        let phoneField = form.fields.find(f => f.type === 'phone');
+        let nameField = form.fields.find(f => f.label.toLowerCase().includes('name'));
+
+        const phone = phoneField ? data[phoneField.id] : null;
+        const name = nameField ? data[nameField.id] : email.split('@')[0]; // Use email prefix if no name
+
+        // Find existing contact or create new one (ALWAYS create lead)
+        let contact = await Contact.findOne({
+            businessId: form.businessId,
+            email: email
+        });
+
+        if (!contact) {
+            // Create new contact/lead
+            contact = await Contact.create({
                 businessId: form.businessId,
-                $or: [
-                    { email: email },
-                    { phone: phone }
-                ].filter(Boolean) // Remove nulls
+                name: name,
+                email: email,
+                phone: phone,
+                source: 'form_submission',
+                status: 'new', // Mark as new lead
+                notes: `Created from form submission: ${form.title}`,
+                tags: ['Form Submission', form.title]
+            });
+        } else {
+            // Update existing contact with any new information
+            if (phone && !contact.phone) {
+                contact.phone = phone;
+            }
+            if (name && name !== email.split('@')[0] && !contact.name) {
+                contact.name = name;
+            }
+            // Add form submission tag if not already present
+            if (!contact.tags.includes('Form Submission')) {
+                contact.tags.push('Form Submission');
+            }
+            if (!contact.tags.includes(form.title)) {
+                contact.tags.push(form.title);
+            }
+            await contact.save();
+        }
+
+        const contactId = contact._id;
+
+        // Create conversation and message in inbox
+        const Conversation = require('../models/Conversation');
+        const Message = require('../models/Message');
+        const Business = require('../models/Business');
+        const { fireAutomation, TRIGGERS } = require('../services/automation.service');
+
+        // Check if conversation already exists
+        let conversation = await Conversation.findOne({
+            businessId: form.businessId,
+            contactId: contact._id,
+        });
+
+        const isNewContact = !conversation;
+
+        if (!conversation) {
+            // Create new conversation
+            conversation = await Conversation.create({
+                businessId: form.businessId,
+                contactId: contact._id,
+                channel: 'email',
+                status: 'open',
+                lastMessageAt: new Date(),
+                automationPaused: false,
             });
 
-            if (!contact) {
-                // Create new contact
-                contact = await Contact.create({
+            // Get business details for automation
+            const business = await Business.findById(form.businessId);
+
+            // Fire NEW_CONTACT automation (welcome email)
+            if (business && business.isSetupComplete) {
+                await fireAutomation(TRIGGERS.NEW_CONTACT, {
                     businessId: form.businessId,
-                    name: name,
-                    email: email,
-                    phone: phone,
-                    source: 'form_submission',
-                    notes: `Created from form submission: ${form.title}`,
-                    tags: ['Form Submission']
+                    contact: contact,
+                    business,
                 });
             }
-            contactId = contact._id;
-
-            // Create conversation if email is provided
-            if (email) {
-                const Conversation = require('../models/Conversation');
-                const Message = require('../models/Message');
-                const Business = require('../models/Business');
-                const { fireAutomation, TRIGGERS } = require('../services/automation.service');
-
-                // Check if conversation already exists
-                let conversation = await Conversation.findOne({
-                    businessId: form.businessId,
-                    contactId: contact._id,
-                });
-
-                if (!conversation) {
-                    // Create new conversation
-                    conversation = await Conversation.create({
-                        businessId: form.businessId,
-                        contactId: contact._id,
-                        channel: 'email',
-                        status: 'open',
-                        lastMessageAt: new Date(),
-                        automationPaused: false,
-                    });
-
-                    // Get business details for automation
-                    const business = await Business.findById(form.businessId);
-
-                    // Fire NEW_CONTACT automation (welcome email)
-                    if (business && business.isSetupComplete) {
-                        await fireAutomation(TRIGGERS.NEW_CONTACT, {
-                            businessId: form.businessId,
-                            contact: contact,
-                            business,
-                        });
-                    }
-                } else {
-                    // Update existing conversation
-                    await Conversation.findByIdAndUpdate(conversation._id, {
-                        $set: { lastMessageAt: new Date() },
-                    });
-                }
-
-                // Create a message record for the form submission
-                await Message.create({
-                    conversationId: conversation._id,
-                    direction: 'inbound',
-                    type: 'manual',
-                    content: `Form submitted: ${form.title}`,
-                    channel: 'email',
-                    sentAt: new Date(),
-                    metadata: {
-                        formId: form._id,
-                        formTitle: form.title,
-                        submissionData: data,
-                    },
-                });
-            }
+        } else {
+            // Update existing conversation
+            await Conversation.findByIdAndUpdate(conversation._id, {
+                $set: { lastMessageAt: new Date(), status: 'open' },
+            });
         }
+
+        // Create a message record for the form submission with formatted data
+        const formattedData = Object.keys(data).map(fieldId => {
+            const field = form.fields.find(f => f.id === fieldId);
+            return field ? `${field.label}: ${data[fieldId]}` : null;
+        }).filter(Boolean).join('\n');
+
+        await Message.create({
+            conversationId: conversation._id,
+            direction: 'inbound',
+            type: 'automated',
+            content: `Form submitted: ${form.title}\n\n${formattedData}`,
+            channel: 'email',
+            sentAt: new Date(),
+            metadata: {
+                formId: form._id,
+                formTitle: form.title,
+                submissionData: data,
+            },
+        });
 
         const submission = await Submission.create({
             formId: form._id,
@@ -384,8 +417,30 @@ exports.submitForm = async (req, res, next) => {
         });
 
         // Increment submission count
-        // Using $inc is safer for concurrency
         await Form.findByIdAndUpdate(form._id, { $inc: { submissionsCount: 1 } });
+
+        // Create notification for form submission
+        try {
+            const { createNotification } = require('./notificationController');
+            const Business = require('../models/Business');
+            
+            const business = await Business.findById(form.businessId);
+            if (business) {
+                await createNotification(form.businessId, business.owner, {
+                    type: 'form',
+                    title: isNewContact ? 'New Lead from Form' : 'Form Submission',
+                    message: `${name} submitted ${form.title}`,
+                    link: '/dashboard/inbox',
+                    metadata: { 
+                        submissionId: submission._id,
+                        formId: form._id,
+                        contactId: contactId
+                    }
+                });
+            }
+        } catch (notifError) {
+            console.error('Failed to create notification:', notifError);
+        }
 
         res.status(201).json({ success: true, message: 'Form submitted successfully' });
     } catch (error) {

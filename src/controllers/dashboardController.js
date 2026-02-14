@@ -3,6 +3,7 @@ const Contact = require('../models/Contact');
 const Conversation = require('../models/Conversation');
 const Inventory = require('../models/Inventory');
 const Submission = require('../models/Submission');
+const Business = require('../models/Business');
 
 // @desc    Get dashboard overview stats
 // @route   GET /api/dashboard/overview
@@ -40,12 +41,39 @@ exports.getOverview = async (req, res, next) => {
             })
         ]);
 
-        // Leads stats
-        const [new24hLeads, openConversations, unansweredMessages] = await Promise.all([
+        // Leads stats - get counts by status
+        const mongoose = require('mongoose');
+        console.log('📊 Fetching leads for businessId:', businessId, 'Type:', typeof businessId);
+        
+        const [new24hLeads, totalLeads, leadsByStatus] = await Promise.all([
             Contact.countDocuments({
                 businessId,
                 createdAt: { $gte: last24h }
             }),
+            Contact.countDocuments({ businessId }),
+            Contact.aggregate([
+                { $match: { businessId: new mongoose.Types.ObjectId(businessId) } },
+                {
+                    $group: {
+                        _id: '$status',
+                        count: { $sum: 1 }
+                    }
+                }
+            ])
+        ]);
+
+        // Transform leadsByStatus to object
+        const leadsStatusCounts = leadsByStatus.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+        }, {});
+
+        console.log('📊 Leads Status Counts:', leadsStatusCounts);
+        console.log('📊 Total Leads:', totalLeads);
+        console.log('📊 Leads By Status Raw:', leadsByStatus);
+
+        // Conversations stats
+        const [openConversations, unansweredMessages] = await Promise.all([
             Conversation.countDocuments({
                 businessId,
                 status: 'open'
@@ -70,11 +98,29 @@ exports.getOverview = async (req, res, next) => {
             return hoursSinceCreated > 24;
         }).length;
 
-        // Inventory stats
+        // Inventory stats - check both quantity and stock fields
         const lowStockItems = await Inventory.find({
             businessId,
-            $expr: { $lte: ['$quantity', '$threshold'] }
-        }).select('name quantity threshold unit').lean();
+            $or: [
+                { $expr: { $lte: ['$quantity', '$threshold'] } },
+                { $expr: { $lte: ['$stock', '$threshold'] } }
+            ]
+        }).select('name quantity stock threshold unit').lean();
+        
+        // Normalize the data - use whichever field has a value
+        const normalizedLowStock = lowStockItems.map(item => ({
+            _id: item._id,
+            name: item.name,
+            quantity: item.quantity || item.stock || 0,
+            threshold: item.threshold || 0,
+            unit: item.unit || 'units'
+        }));
+        
+        console.log('📦 Backend - Low Stock Query Result:', normalizedLowStock);
+
+        // Get services count from business
+        const business = await Business.findById(businessId).select('services').lean();
+        const servicesCount = business?.services?.length || 0;
 
         res.json({
             success: true,
@@ -87,6 +133,12 @@ exports.getOverview = async (req, res, next) => {
                 },
                 leads: {
                     new24h: new24hLeads,
+                    total: totalLeads,
+                    new: leadsStatusCounts.new || 0,
+                    contacted: leadsStatusCounts.contacted || 0,
+                    qualified: leadsStatusCounts.qualified || 0,
+                    booked: leadsStatusCounts.booked || 0,
+                    closed: leadsStatusCounts.closed || 0,
                     openConversations,
                     unanswered: unansweredMessages
                 },
@@ -96,7 +148,10 @@ exports.getOverview = async (req, res, next) => {
                     completed: completedForms
                 },
                 inventory: {
-                    lowStock: lowStockItems
+                    lowStock: normalizedLowStock
+                },
+                services: {
+                    count: servicesCount
                 }
             }
         });
@@ -175,10 +230,13 @@ exports.getAlerts = async (req, res, next) => {
             });
         }
 
-        // Check for low stock items
+        // Check for low stock items - check both quantity and stock fields
         const lowStockCount = await Inventory.countDocuments({
             businessId,
-            $expr: { $lte: ['$quantity', '$threshold'] }
+            $or: [
+                { $expr: { $lte: ['$quantity', '$threshold'] } },
+                { $expr: { $lte: ['$stock', '$threshold'] } }
+            ]
         });
 
         if (lowStockCount > 0) {
@@ -211,18 +269,18 @@ exports.getRecentActivity = async (req, res, next) => {
         const now = new Date();
         const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-        // Get bookings by day for last 7 days
+        // Get bookings by BOOKING DATE (not createdAt) for last 7 days
         const bookingsByDay = await Booking.aggregate([
             {
                 $match: {
                     businessId,
-                    createdAt: { $gte: sevenDaysAgo }
+                    date: { $gte: sevenDaysAgo, $lte: now }
                 }
             },
             {
                 $group: {
                     _id: {
-                        $dateToString: { format: '%Y-%m-%d', date: '$createdAt' }
+                        $dateToString: { format: '%Y-%m-%d', date: '$date' }
                     },
                     count: { $sum: 1 }
                 }
@@ -325,3 +383,5 @@ exports.getRecentActivity = async (req, res, next) => {
         next(error);
     }
 };
+
+

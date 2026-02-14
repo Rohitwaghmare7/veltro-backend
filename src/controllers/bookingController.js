@@ -61,6 +61,7 @@ exports.createBooking = async (req, res, next) => {
     try {
         const { clientName, clientEmail, clientPhone, serviceType, date, timeSlot, duration, location, notes } = req.body;
         const { fireAutomation, TRIGGERS } = require('../services/automation.service');
+        const { createNotification } = require('./notificationController');
 
         // Check availability first
         const availabilityCheck = await checkSlotAvailability(
@@ -119,6 +120,48 @@ exports.createBooking = async (req, res, next) => {
         // Get business details
         const business = await Business.findById(req.businessId);
 
+        // Create or update inbox conversation
+        const Conversation = require('../models/Conversation');
+        const Message = require('../models/Message');
+        
+        let conversation = await Conversation.findOne({
+            businessId: req.businessId,
+            contactId: contact._id,
+        });
+
+        if (!conversation) {
+            conversation = await Conversation.create({
+                businessId: req.businessId,
+                contactId: contact._id,
+                channel: 'email',
+                status: 'open',
+                lastMessageAt: new Date(),
+                automationPaused: false,
+            });
+        } else {
+            await Conversation.findByIdAndUpdate(conversation._id, {
+                $set: { lastMessageAt: new Date(), status: 'open' },
+            });
+        }
+
+        // Create a message for the booking
+        const bookingDate = new Date(date).toLocaleDateString();
+        await Message.create({
+            conversationId: conversation._id,
+            direction: 'inbound',
+            type: 'manual',
+            content: `New booking: ${serviceType} on ${bookingDate} at ${timeSlot}`,
+            channel: 'email',
+            sentAt: new Date(),
+            metadata: {
+                bookingId: booking._id,
+                serviceType,
+                date,
+                timeSlot,
+                duration: duration || 60,
+            },
+        });
+
         // Sync with Google Calendar if connected
         if (business?.integrations?.googleCalendar?.connected) {
             try {
@@ -159,6 +202,27 @@ exports.createBooking = async (req, res, next) => {
             business,
         });
 
+        // Create notification for business owner
+        try {
+            const bookingDate = new Date(booking.date);
+            const formattedDate = bookingDate.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric',
+                year: 'numeric'
+            });
+            
+            await createNotification(req.businessId, business.owner, {
+                type: 'booking',
+                title: 'New Booking Received',
+                message: `${clientName} booked ${serviceType} for ${formattedDate} at ${timeSlot}`,
+                link: '/dashboard/bookings',
+                metadata: { bookingId: booking._id }
+            });
+        } catch (notifError) {
+            console.error('Failed to create notification:', notifError);
+            // Don't fail the booking if notification fails
+        }
+
         res.status(201).json({ success: true, data: booking });
     } catch (error) {
         next(error);
@@ -171,6 +235,8 @@ exports.createBooking = async (req, res, next) => {
 exports.updateBookingStatus = async (req, res, next) => {
     try {
         const { status } = req.body;
+        const { createNotification } = require('./notificationController');
+        
         const booking = await Booking.findOne({
             _id: req.params.id,
             businessId: req.businessId,
@@ -188,6 +254,36 @@ exports.updateBookingStatus = async (req, res, next) => {
         }
         
         await booking.save();
+
+        // Create notification for status change
+        try {
+            const business = await Business.findById(req.businessId);
+            let notificationTitle = '';
+            let notificationMessage = '';
+            
+            if (status === 'cancelled' && oldStatus !== 'cancelled') {
+                notificationTitle = 'Booking Cancelled';
+                notificationMessage = `${booking.clientName} cancelled their ${booking.serviceType} appointment`;
+            } else if (status === 'confirmed' && oldStatus !== 'confirmed') {
+                notificationTitle = 'Booking Confirmed';
+                notificationMessage = `${booking.clientName} confirmed their ${booking.serviceType} appointment`;
+            } else if (status === 'completed' && oldStatus !== 'completed') {
+                notificationTitle = 'Booking Completed';
+                notificationMessage = `${booking.serviceType} appointment with ${booking.clientName} completed`;
+            }
+
+            if (notificationMessage) {
+                await createNotification(req.businessId, business.owner, {
+                    type: 'booking',
+                    title: notificationTitle,
+                    message: notificationMessage,
+                    link: '/dashboard/bookings',
+                    metadata: { bookingId: booking._id }
+                });
+            }
+        } catch (notifError) {
+            console.error('Failed to create notification:', notifError);
+        }
 
         res.json({ success: true, data: booking });
     } catch (error) {
@@ -383,7 +479,7 @@ exports.getBookingStatistics = async (req, res, next) => {
 exports.getPublicBookingPage = async (req, res, next) => {
     try {
         const business = await Business.findOne({ bookingSlug: req.params.slug })
-            .select('name category address workingHours email phone services isSetupComplete');
+            .select('name category address workingHours operatingHours email phone services isSetupComplete');
 
         if (!business) {
             return res.status(404).json({ success: false, message: 'Business not found' });
@@ -442,6 +538,7 @@ exports.getPublicAvailableSlots = async (req, res, next) => {
 exports.createPublicBooking = async (req, res, next) => {
     try {
         const { fireAutomation, TRIGGERS } = require('../services/automation.service');
+        const { createNotification } = require('./notificationController');
 
         const business = await Business.findOne({ bookingSlug: req.params.slug });
         if (!business) {
@@ -541,6 +638,78 @@ exports.createPublicBooking = async (req, res, next) => {
             contact,
             business,
         });
+
+        // Create notification for business owner
+        try {
+            const bookingDate = new Date(booking.date);
+            const formattedDate = bookingDate.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric',
+                year: 'numeric'
+            });
+            
+            await createNotification(business._id, business.owner, {
+                type: 'booking',
+                title: 'New Booking Received',
+                message: `${clientName} booked ${serviceType} for ${formattedDate} at ${timeSlot}`,
+                link: '/dashboard/bookings',
+                metadata: { bookingId: booking._id }
+            });
+        } catch (notifError) {
+            console.error('Failed to create notification:', notifError);
+        }
+
+        // Create or update conversation in inbox
+        try {
+            const Conversation = require('../models/Conversation');
+            const Message = require('../models/Message');
+
+            let conversation = await Conversation.findOne({
+                businessId: business._id,
+                contactId: contact._id,
+            });
+
+            if (!conversation) {
+                conversation = await Conversation.create({
+                    businessId: business._id,
+                    contactId: contact._id,
+                    channel: 'email',
+                    status: 'open',
+                    lastMessageAt: new Date(),
+                });
+            } else {
+                conversation.lastMessageAt = new Date();
+                conversation.status = 'open';
+                await conversation.save();
+            }
+
+            // Create message with booking details
+            const bookingDate = new Date(booking.date);
+            const formattedDate = bookingDate.toLocaleDateString('en-US', { 
+                weekday: 'long',
+                month: 'long', 
+                day: 'numeric',
+                year: 'numeric'
+            });
+
+            const messageContent = `New booking received:\n\nService: ${serviceType}\nDate: ${formattedDate}\nTime: ${timeSlot}\nDuration: ${duration || 60} minutes\n\nClient: ${clientName}\nEmail: ${clientEmail}${clientPhone ? `\nPhone: ${clientPhone}` : ''}`;
+
+            await Message.create({
+                conversationId: conversation._id,
+                direction: 'inbound',
+                type: 'automated',
+                content: messageContent,
+                channel: 'email',
+                sentAt: new Date(),
+                metadata: {
+                    subject: `New Booking: ${serviceType}`,
+                    from: clientEmail,
+                    to: business.email || business.owner.email,
+                },
+            });
+        } catch (inboxError) {
+            console.error('Failed to create inbox conversation:', inboxError);
+        }
 
         res.status(201).json({ 
             success: true, 

@@ -1,6 +1,21 @@
 const Business = require('../models/Business');
 const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
+const jwt = require('jsonwebtoken');
+
+// Generate JWT token
+const generateToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRE || '7d',
+    });
+};
+
+// Generate refresh token
+const generateRefreshToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_REFRESH_SECRET, {
+        expiresIn: process.env.JWT_REFRESH_EXPIRE || '30d',
+    });
+};
 
 // @desc    Update onboarding step data
 // @route   PUT /api/onboarding/step/:stepNum
@@ -151,7 +166,15 @@ exports.completeOnboarding = async (req, res, next) => {
         await business.save();
 
         // Mark user as onboarded
-        const user = await User.findByIdAndUpdate(req.user._id, { isOnboarded: true });
+        const user = await User.findByIdAndUpdate(
+            req.user._id, 
+            { isOnboarded: true },
+            { new: true } // Return updated user
+        );
+
+        // Generate new tokens with updated user data
+        const token = generateToken(user._id);
+        const refreshToken = generateRefreshToken(user._id);
 
         // Send Welcome Email
         if (business.emailConnected) {
@@ -172,6 +195,16 @@ exports.completeOnboarding = async (req, res, next) => {
             data: {
                 message: 'Onboarding completed successfully!',
                 business,
+                token,
+                refreshToken,
+                user: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    isOnboarded: user.isOnboarded,
+                    businessId: user.businessId
+                }
             },
         });
     } catch (error) {

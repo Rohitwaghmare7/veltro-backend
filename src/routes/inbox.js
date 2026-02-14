@@ -10,6 +10,10 @@ const {
     getContactSubmissions,
     resumeAutomation,
     uploadAttachments,
+    sendFormToContact,
+    createConversation,
+    deleteConversation,
+    bulkDeleteConversations,
 } = require('../controllers/inboxController');
 const { protect } = require('../middleware/auth');
 const { requirePermission } = require('../middleware/role');
@@ -35,10 +39,22 @@ router.patch('/conversations/:id/reopen', requirePermission('inbox'), reopenConv
 // Resume automation for a conversation
 router.patch('/conversations/:id/resume-automation', requirePermission('inbox'), resumeAutomation);
 
+// Delete a conversation
+router.delete('/conversations/:id', requirePermission('inbox'), deleteConversation);
+
+// Bulk delete conversations
+router.post('/conversations/bulk-delete', requirePermission('inbox'), bulkDeleteConversations);
+
 // Get linked bookings for a contact
 router.get('/contacts/:contactId/bookings', requirePermission('inbox'), getContactBookings);
 
 // Get linked form submissions for a contact
 router.get('/contacts/:contactId/submissions', requirePermission('inbox'), getContactSubmissions);
+
+// Send form to contact via email
+router.post('/send-form', requirePermission('inbox'), sendFormToContact);
+
+// Create new conversation
+router.post('/create-conversation', requirePermission('inbox'), createConversation);
 
 module.exports = router;

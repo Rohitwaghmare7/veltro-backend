@@ -135,7 +135,7 @@ const wrapEmailTemplate = (content, businessName) => {
  * Send email with error handling and logging
  * Uses SendGrid API if available, falls back to SMTP
  */
-const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) => {
+const sendEmail = async ({ to, subject, html, businessId, trigger, contactId, attachments }) => {
     try {
         // Try SendGrid API first if API key is available
         let messageId = null;
@@ -150,6 +150,16 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) 
                 html,
             };
 
+            // Add attachments if provided
+            if (attachments && attachments.length > 0) {
+                msg.attachments = attachments.map(att => ({
+                    content: att.content.toString('base64'),
+                    filename: att.filename,
+                    type: att.contentType,
+                    disposition: 'attachment'
+                }));
+            }
+
             const response = await sgMail.send(msg);
             messageId = response[0]?.headers?.['x-message-id'] || 'sendgrid-api';
             console.log('✅ Email sent via SendGrid API to:', to);
@@ -163,6 +173,11 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) 
                 subject,
                 html,
             };
+
+            // Add attachments if provided
+            if (attachments && attachments.length > 0) {
+                mailOptions.attachments = attachments;
+            }
 
             const info = await transporter.sendMail(mailOptions);
             messageId = info.messageId;
@@ -187,7 +202,7 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId }) 
         }
 
         console.log('✅ Email sent successfully');
-        return { success: true, messageId: info.messageId };
+        return { success: true, messageId };
     } catch (error) {
         console.error('❌ Email send failed:', error.message);
 
