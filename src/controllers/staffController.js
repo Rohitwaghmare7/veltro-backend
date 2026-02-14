@@ -335,30 +335,53 @@ exports.resendInvite = async (req, res, next) => {
 };
 // @desc    Accept invitation
 // @route   POST /api/staff/accept/:token
-// @access  Private (Logged in user)
+// @access  Public
 exports.acceptInvite = async (req, res, next) => {
     try {
-        // Find staff by token. Status could be 'pending' or 'accepted' (if just registered)
+        // Find staff by token
         const staff = await Staff.findOne({
             inviteToken: req.params.token,
-            inviteStatus: { $in: ['pending', 'accepted'] }
+            inviteStatus: 'pending'
         });
 
         if (!staff) {
             return res.status(404).json({ success: false, message: 'Invalid or expired invitation' });
         }
 
-        // If it was pending, mark as accepted and link user
-        if (staff.inviteStatus === 'pending') {
-            staff.userId = req.user._id;
+        // Check if a user with this email already exists
+        const User = require('../models/User');
+        const existingUser = await User.findOne({ email: staff.email });
+
+        if (existingUser) {
+            // User exists - link the staff record to the user
+            staff.userId = existingUser._id;
             staff.inviteStatus = 'accepted';
+            staff.inviteToken = undefined;
+            await staff.save();
+
+            // DO NOT update user's businessId - staff members access via X-Business-Id header
+            // Only set isOnboarded if they haven't onboarded yet
+            if (!existingUser.isOnboarded) {
+                await User.findByIdAndUpdate(existingUser._id, {
+                    isOnboarded: true
+                });
+            }
+
+            res.json({ 
+                success: true, 
+                userExists: true,
+                message: 'Invitation accepted successfully.' 
+            });
+        } else {
+            // User doesn't exist - they need to register first
+            res.json({ 
+                success: true, 
+                userExists: false,
+                message: 'Please complete registration to accept this invitation.',
+                email: staff.email,
+                name: staff.name
+            });
         }
-
-        // Always clear the token once it's been used to land here
-        staff.inviteToken = undefined;
-        await staff.save();
-
-        res.json({ success: true, message: 'Invitation accepted successfully' });
     } catch (error) {
         next(error);
     }
@@ -404,12 +427,13 @@ exports.getMyBusinesses = async (req, res, next) => {
         // 2. Get businesses where user is staff (accepted invites)
         const staffRecords = await Staff.find({
             userId: req.user._id,
-            inviteStatus: 'accepted'
+            inviteStatus: 'accepted',
+            status: 'active'
         }).populate('businessId', 'name bookingSlug');
 
         const businesses = [];
 
-        // Add owned businesses labeled as 'owner'
+        // Add owned businesses FIRST (labeled as 'owner')
         ownedBusinesses.forEach(biz => {
             businesses.push({
                 _id: biz._id,
@@ -419,7 +443,7 @@ exports.getMyBusinesses = async (req, res, next) => {
             });
         });
 
-        // Add staff businesses labeled as 'staff'
+        // Add staff businesses AFTER owned businesses (labeled as 'staff')
         staffRecords.forEach(record => {
             // Check if we already added this as owner (should not happen if data is clean)
             if (businesses.some(b => b._id.toString() === record.businessId?._id.toString())) return;
@@ -446,7 +470,10 @@ exports.getMyBusinesses = async (req, res, next) => {
 exports.getStaffMe = async (req, res, next) => {
     try {
         // 1. Check if user is the owner of this business
-        if (req.user.role === 'owner' && req.user.businessId?.toString() === req.businessId?.toString()) {
+        const Business = require('../models/Business');
+        const business = await Business.findById(req.businessId);
+        
+        if (business && business.owner.toString() === req.user._id.toString()) {
             return res.json({
                 success: true,
                 data: {

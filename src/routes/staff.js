@@ -18,10 +18,12 @@ const {
 // Public route for fetching invite info (for registration pre-fill)
 router.get('/invite/info/:token', getInviteInfo);
 
+// Public route for accepting invite (no auth required)
+router.post('/accept/:token', acceptInvite);
+
 router.use(protect);
 
 router.get('/businesses', getMyBusinesses);
-router.post('/accept/:token', acceptInvite);
 
 router.use(setBusinessContext);
 

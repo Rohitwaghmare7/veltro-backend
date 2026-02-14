@@ -42,8 +42,12 @@ const requirePermission = (permission) => {
             });
         }
 
-        // Owners have all permissions for their business
-        if (req.user.role === 'owner' && req.user.businessId?.toString() === businessId.toString()) {
+        // Check if user is owner of this business
+        const Business = require('../models/Business');
+        const business = await Business.findById(businessId);
+        
+        if (business && business.owner.toString() === req.user._id.toString()) {
+            // User is the owner - grant all permissions
             req.businessId = businessId;
             return next();
         }

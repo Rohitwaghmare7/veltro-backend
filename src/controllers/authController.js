@@ -33,7 +33,7 @@ exports.register = async (req, res, next) => {
         }
 
         let userRole = 'owner';
-        let businessId = null;
+        let businessIdForStaff = null;
 
         // If registering via invite
         if (inviteToken) {
@@ -45,17 +45,16 @@ exports.register = async (req, res, next) => {
 
             if (staff) {
                 userRole = 'staff';
-                businessId = staff.businessId;
+                businessIdForStaff = staff.businessId;
             }
         }
 
-        // Create user
+        // Create user (DO NOT set businessId for staff - they access via X-Business-Id header)
         const user = await User.create({
             name,
             email,
             password,
             role: userRole,
-            businessId, // Set if staff, otherwise updated below for owner
             isOnboarded: !!inviteToken, // Mark as onboarded if staff (skips onboarding flow)
         });
 
@@ -164,7 +163,25 @@ exports.login = async (req, res, next) => {
         }
 
         // Get business info
-        const business = await Business.findOne({ owner: user._id });
+        let business = null;
+        
+        if (user.role === 'owner') {
+            // For owners, get their business
+            business = await Business.findOne({ owner: user._id });
+        } else if (user.role === 'staff') {
+            // For staff, get the business they're assigned to (but don't set user.businessId)
+            const Staff = require('../models/Staff');
+            const staffRecord = await Staff.findOne({
+                userId: user._id,
+                inviteStatus: 'accepted',
+                status: 'active'
+            }).populate('businessId');
+            
+            if (staffRecord && staffRecord.businessId) {
+                business = staffRecord.businessId;
+                // DO NOT set user.businessId for staff - they access via X-Business-Id header
+            }
+        }
 
         const token = generateToken(user._id);
         const refreshToken = generateRefreshToken(user._id);

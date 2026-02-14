@@ -45,11 +45,16 @@ const authorizeStaff = (permissions) => {
     return async (req, res, next) => {
         const perms = Array.isArray(permissions) ? permissions : [permissions];
 
-        // If owner of the CURRENT context business, skip staff check
-        if (req.user.role === 'owner' && req.user.businessId?.toString() === req.businessId?.toString()) {
+        // Check if user is owner of the CURRENT context business
+        const Business = require('../models/Business');
+        const business = await Business.findById(req.businessId);
+        
+        if (business && business.owner.toString() === req.user._id.toString()) {
+            // User is the owner - grant all permissions
             return next();
         }
 
+        // User is not the owner, check staff permissions
         const Staff = require('../models/Staff');
         const staff = await Staff.findOne({
             userId: req.user._id,
@@ -80,25 +85,39 @@ const authorizeStaff = (permissions) => {
  * Allows users to switch between businesses they own or are staff in.
  */
 const setBusinessContext = async (req, res, next) => {
-    const businessId = req.headers['x-business-id'] || req.user.businessId;
+    // Get businessId from header or from user's current businessId
+    let businessId = req.headers['x-business-id'] || req.user.businessId;
+
+    // If no businessId provided, try to find one the user has access to
+    if (!businessId) {
+        const Business = require('../models/Business');
+        const ownedBusiness = await Business.findOne({ owner: req.user._id });
+        if (ownedBusiness) {
+            businessId = ownedBusiness._id.toString();
+        }
+    }
 
     if (!businessId) {
         return res.status(400).json({ success: false, message: 'No business context provided' });
     }
 
     try {
-        // 1. If user is owner of this business ID, it's valid context
-        if (req.user.role === 'owner' && req.user.businessId?.toString() === businessId.toString()) {
+        const Business = require('../models/Business');
+        
+        // 1. Check if user is owner of this business
+        const business = await Business.findById(businessId);
+        if (business && business.owner.toString() === req.user._id.toString()) {
             req.businessId = businessId;
             return next();
         }
 
-        // 2. Otherwise, check if user is an accepted staff member for this business
+        // 2. Check if user is an accepted staff member for this business
         const Staff = require('../models/Staff');
         const staff = await Staff.findOne({
             businessId,
             userId: req.user._id,
-            inviteStatus: 'accepted'
+            inviteStatus: 'accepted',
+            status: 'active'
         });
 
         if (!staff) {
