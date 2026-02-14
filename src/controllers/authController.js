@@ -309,14 +309,9 @@ exports.forgotPassword = async (req, res, next) => {
         const resetUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
         try {
-            const { sendEmail, passwordResetEmail } = require('../services/email.service');
-            const emailTemplate = passwordResetEmail(user.name, resetUrl);
+            const { sendPasswordResetEmail } = require('../services/systemEmail.service');
 
-            await sendEmail({
-                to: user.email,
-                subject: emailTemplate.subject,
-                html: emailTemplate.html,
-            });
+            await sendPasswordResetEmail(user.email, resetToken);
 
             res.status(200).json({
                 success: true,
