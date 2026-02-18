@@ -226,10 +226,17 @@ exports.disconnectIntegration = async (req, res, next) => {
 exports.connectGoogle = async (req, res, next) => {
     try {
         const businessId = req.businessId || req.user.businessId;
+        const returnTo = req.query.return || 'dashboard'; // Check where to return after OAuth
+        
+        // Use URI 1 from Google Cloud Console: /api/auth/google/callback
+        // But since integrations routes are mounted at /api/integrations, we need to create a separate route
+        // For now, let's use the dashboard callback which already works
+        const callbackUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard/integrations/callback`;
+        
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `${process.env.CLIENT_URL}/dashboard/integrations/callback`
+            callbackUrl
         );
 
         const scopes = [
@@ -243,7 +250,7 @@ exports.connectGoogle = async (req, res, next) => {
         const url = oauth2Client.generateAuthUrl({
             access_type: 'offline',
             scope: scopes,
-            state: businessId, // Pass business ID in state
+            state: JSON.stringify({ businessId, return: returnTo }), // Pass business ID and return destination in state
             prompt: 'consent', // Force consent screen to get refresh token
         });
 
@@ -256,18 +263,31 @@ exports.connectGoogle = async (req, res, next) => {
 // Google OAuth - Callback
 exports.googleCallback = async (req, res, next) => {
     try {
-        const { code } = req.query;
-        // Get business ID from authenticated user instead of state parameter
-        const businessId = req.businessId || req.user.businessId;
+        const { code, state } = req.query;
+        
+        // Parse state parameter
+        let businessId, returnTo;
+        try {
+            const stateData = JSON.parse(state);
+            businessId = stateData.businessId;
+            returnTo = stateData.return || 'dashboard';
+        } catch (e) {
+            // Fallback for old format (just businessId)
+            businessId = state || req.businessId || req.user.businessId;
+            returnTo = 'dashboard';
+        }
 
         if (!code || !businessId) {
             return res.status(400).json({ message: 'Missing authorization code or business ID' });
         }
 
+        // Use the dashboard callback URL (URI 2 in Google Cloud Console)
+        const callbackUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard/integrations/callback`;
+
         const oauth2Client = new google.auth.OAuth2(
             process.env.GOOGLE_CLIENT_ID,
             process.env.GOOGLE_CLIENT_SECRET,
-            `${process.env.CLIENT_URL}/dashboard/integrations/callback`
+            callbackUrl
         );
 
         const { tokens } = await oauth2Client.getToken(code);
@@ -295,6 +315,7 @@ exports.googleCallback = async (req, res, next) => {
 
         await business.save();
 
+        // Return success - frontend callback page will handle the redirect
         res.json({ message: 'Google Account connected successfully' });
     } catch (error) {
         next(error);

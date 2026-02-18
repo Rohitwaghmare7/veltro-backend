@@ -43,6 +43,7 @@ router.post('/:id/disconnect', disconnectIntegration);
 // Google Calendar OAuth
 router.get('/google/connect', connectGoogle);
 router.get('/google-calendar/callback', googleCallback);
+router.get('/auth/google/callback', googleCallback); // Shared callback for both Gmail and Calendar
 
 // Gmail OAuth
 router.get('/gmail/connect', connectGmail);
