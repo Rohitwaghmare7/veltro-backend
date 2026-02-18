@@ -8,7 +8,6 @@ from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import deepgram, openai, silero
 from livekit.agents.llm import ChatContext, ChatMessage
 from livekit import rtc
-from edge_tts_plugin import EdgeTTS  # Our free TTS
 
 # Load environment variables from .env file
 load_dotenv()
