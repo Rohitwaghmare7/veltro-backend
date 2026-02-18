@@ -10,6 +10,7 @@ const automationLogSchema = new mongoose.Schema(
                 'BOOKING_CREATED',
                 'BOOKING_REMINDER',
                 'FORM_PENDING',
+                'FORM_AUTO_SEND',
                 'INVENTORY_LOW',
                 'STAFF_REPLIED',
             ],

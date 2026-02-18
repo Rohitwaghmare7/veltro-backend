@@ -11,7 +11,8 @@ const {
     exportSubmissions,
     getBookingForms,
     getPublicForm,
-    submitForm
+    submitForm,
+    toggleDefaultBookingForm
 } = require('../controllers/formController');
 
 // Public routes
@@ -32,6 +33,7 @@ router.route('/:id')
     .put(updateForm)
     .delete(deleteForm);
 
+router.patch('/:id/toggle-default', toggleDefaultBookingForm);
 router.get('/:id/submissions', getSubmissions);
 router.get('/:id/export', exportSubmissions);
 router.get('/booking/:bookingId', getBookingForms);

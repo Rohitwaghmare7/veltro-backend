@@ -6,10 +6,17 @@ const gmailService = require('./gmail.service');
 /**
  * Send email using Gmail if connected, otherwise use SMTP
  */
-const sendEmailSmart = async ({ businessId, to, subject, html, trigger, contactId }) => {
+const sendEmailSmart = async ({ businessId, to, subject, html, contactId }) => {
     try {
         // Check if Gmail is connected
         const business = await Business.findById(businessId);
+        
+        console.log('📧 [EMAIL] Checking Gmail connection...');
+        console.log('📧 [EMAIL] Business ID:', businessId);
+        console.log('📧 [EMAIL] Gmail integration exists:', !!business?.integrations?.gmail);
+        console.log('📧 [EMAIL] Gmail connected:', business?.integrations?.gmail?.connected);
+        console.log('📧 [EMAIL] Gmail email:', business?.integrations?.gmail?.email);
+        console.log('📧 [EMAIL] Has access token:', !!business?.integrations?.gmail?.accessToken);
         
         if (business?.integrations?.gmail?.connected) {
             console.log('📧 [EMAIL] Using Gmail to send email');
@@ -24,8 +31,11 @@ const sendEmailSmart = async ({ businessId, to, subject, html, trigger, contactI
                 return { success: true, messageId: result.id, via: 'gmail' };
             } catch (gmailError) {
                 console.error('❌ [EMAIL] Gmail send failed, falling back to SMTP:', gmailError.message);
+                console.error('Gmail error details:', gmailError);
                 // Fall back to SMTP if Gmail fails
             }
+        } else {
+            console.log('📧 [EMAIL] Gmail not connected, using SMTP');
         }
         
         // Use SMTP (either Gmail not connected or Gmail failed)
@@ -35,8 +45,8 @@ const sendEmailSmart = async ({ businessId, to, subject, html, trigger, contactI
             subject,
             html,
             businessId,
-            trigger,
             contactId,
+            // Don't pass trigger to avoid AutomationLog issues
         });
         
         return { ...result, via: 'smtp' };
@@ -61,24 +71,34 @@ const sendLinkedForms = async ({ businessId, booking, contact, business }) => {
         console.log(`📋 [FORM SENDING] Service Type: ${booking.serviceType}`);
         console.log(`📋 [FORM SENDING] Contact Email: ${contact.email}`);
 
-        // Find forms linked to this service with auto-send enabled
+        // Find forms to send:
+        // 1. Forms linked to this service with auto-send enabled
+        // 2. Default booking form (marked with star)
         const forms = await Form.find({
             businessId,
-            linkedServices: booking.serviceType,
-            autoSendAfterBooking: true,
+            $or: [
+                {
+                    linkedServices: booking.serviceType,
+                    autoSendAfterBooking: true,
+                },
+                {
+                    isDefaultBookingForm: true, // Send default booking form regardless of service
+                }
+            ],
             isActive: true,
         });
 
         console.log(`📋 [FORM SENDING] Found ${forms.length} form(s) matching criteria`);
 
         if (forms.length === 0) {
-            console.log('ℹ️ [FORM SENDING] No auto-send forms found for this service');
+            console.log('ℹ️ [FORM SENDING] No auto-send forms or default booking form found');
             return { success: true, formsSent: 0 };
         }
 
         console.log(`📨 [FORM SENDING] Preparing to send ${forms.length} form(s)`);
         forms.forEach((form, index) => {
-            console.log(`   ${index + 1}. "${form.title}" (ID: ${form._id})`);
+            const formType = form.isDefaultBookingForm ? '⭐ Default Booking Form' : '🔗 Service-Linked Form';
+            console.log(`   ${index + 1}. "${form.title}" (${formType}) (ID: ${form._id})`);
         });
 
         const results = [];
@@ -161,8 +181,8 @@ const sendLinkedForms = async ({ businessId, booking, contact, business }) => {
                     to: contact.email,
                     subject: emailSubject,
                     html: emailHtml,
-                    trigger: 'FORM_AUTO_SEND',
                     contactId: contact._id,
+                    // Don't pass trigger to avoid AutomationLog validation issues
                 });
 
                 results.push({

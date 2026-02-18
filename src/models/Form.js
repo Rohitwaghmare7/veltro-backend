@@ -52,6 +52,10 @@ const formSchema = new mongoose.Schema(
             type: Number,
             default: 0, // Minutes after booking to send form
         },
+        isDefaultBookingForm: {
+            type: Boolean,
+            default: false, // Only one form per business can be marked as default
+        },
     },
     {
         timestamps: true,

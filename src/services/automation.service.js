@@ -20,6 +20,13 @@ const sendEmailSmart = async ({ businessId, to, subject, html, trigger, contactI
         // Check if Gmail is connected
         const business = await Business.findById(businessId);
         
+        console.log('📧 [AUTOMATION] Checking Gmail connection...');
+        console.log('📧 [AUTOMATION] Business ID:', businessId);
+        console.log('📧 [AUTOMATION] Gmail integration exists:', !!business?.integrations?.gmail);
+        console.log('📧 [AUTOMATION] Gmail connected:', business?.integrations?.gmail?.connected);
+        console.log('📧 [AUTOMATION] Gmail email:', business?.integrations?.gmail?.email);
+        console.log('📧 [AUTOMATION] Has access token:', !!business?.integrations?.gmail?.accessToken);
+        
         if (business?.integrations?.gmail?.connected) {
             console.log('📧 [AUTOMATION] Using Gmail to send email');
             try {
@@ -50,8 +57,11 @@ const sendEmailSmart = async ({ businessId, to, subject, html, trigger, contactI
                 return { success: true, messageId: result.id, via: 'gmail' };
             } catch (gmailError) {
                 console.error('❌ [AUTOMATION] Gmail send failed, falling back to SMTP:', gmailError.message);
+                console.error('Gmail error details:', gmailError);
                 // Fall back to SMTP if Gmail fails
             }
+        } else {
+            console.log('📧 [AUTOMATION] Gmail not connected, using SMTP');
         }
         
         // Use SMTP (either Gmail not connected or Gmail failed)

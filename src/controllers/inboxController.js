@@ -236,8 +236,8 @@ exports.sendReply = async (req, res, next) => {
                 contentType: file.mimetype
             }));
 
-            // Check if Gmail integration is available and has thread ID
-            if (business.integrations?.gmail?.connected && conversation.metadata?.gmailThreadId) {
+            // Check if Gmail integration is available
+            if (business.integrations?.gmail?.connected) {
                 console.log('📧 Using Gmail API for reply');
                 const gmailService = require('../services/gmail.service');
                 
@@ -250,18 +250,48 @@ exports.sendReply = async (req, res, next) => {
                 }));
 
                 try {
-                    await gmailService.sendEmail(businessId, {
+                    const emailData = {
                         to: conversation.contactId.email,
                         subject: `Message from ${business.name}`,
                         body: content.replace(/\n/g, '<br>'),
-                        threadId: conversation.metadata.gmailThreadId,
                         attachments: gmailAttachments.length > 0 ? gmailAttachments : undefined
-                    });
+                    };
+                    
+                    // Include thread ID if available (for replies to existing Gmail threads)
+                    if (conversation.metadata?.gmailThreadId) {
+                        emailData.threadId = conversation.metadata.gmailThreadId;
+                        console.log('📧 Replying to existing Gmail thread:', emailData.threadId);
+                    } else {
+                        console.log('📧 Creating new Gmail thread');
+                    }
+                    
+                    await gmailService.sendEmail(businessId, emailData);
                     console.log('✅ Reply sent via Gmail API');
                 } catch (emailError) {
                     console.error('❌ Gmail API send failed:', emailError.message);
-                    // Don't throw - message is already saved
-                    console.log('⚠️  Email failed but message saved in conversation');
+                    console.error('Gmail error details:', emailError);
+                    // Fall back to SMTP
+                    console.log('📧 Falling back to SMTP...');
+                    try {
+                        const result = await sendEmail({
+                            to: conversation.contactId.email,
+                            subject: `Message from ${business.name}`,
+                            html: `
+                                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                                    <h2 style="color: #333;">Message from ${business.name}</h2>
+                                    <p style="color: #666; line-height: 1.6; white-space: pre-wrap;">${content}</p>
+                                    <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                                    <p style="color: #999; font-size: 12px;">
+                                        This message was sent by ${req.user.name} from ${business.name}
+                                    </p>
+                                </div>
+                            `,
+                            attachments: emailAttachments.length > 0 ? emailAttachments : undefined
+                        });
+                        console.log('✅ Reply email sent via SMTP (fallback):', result);
+                    } catch (smtpError) {
+                        console.error('❌ SMTP fallback also failed:', smtpError.message);
+                    }
                 }
             } else {
                 console.log('📧 Using SMTP for reply (no Gmail thread or not connected)');
@@ -597,23 +627,45 @@ exports.sendFormToContact = async (req, res, next) => {
         console.log('📧 Gmail thread ID:', conversation.metadata?.gmailThreadId);
 
         // Check if Gmail integration is available
-        if (business.integrations?.gmail?.connected && conversation.metadata?.gmailThreadId) {
+        if (business.integrations?.gmail?.connected) {
             console.log('📧 Using Gmail API to send form');
             const gmailService = require('../services/gmail.service');
             try {
-                await gmailService.sendEmail(businessId, {
+                const emailData = {
                     to: contactEmail,
                     subject: `${form.title} - ${business.name}`,
                     body: emailContent,
-                    threadId: conversation.metadata.gmailThreadId,
-                });
+                };
+                
+                // Include thread ID if available (for replies to existing Gmail threads)
+                if (conversation.metadata?.gmailThreadId) {
+                    emailData.threadId = conversation.metadata.gmailThreadId;
+                    console.log('📧 Sending form to existing Gmail thread:', emailData.threadId);
+                } else {
+                    console.log('📧 Creating new Gmail thread for form');
+                }
+                
+                await gmailService.sendEmail(businessId, emailData);
                 console.log('✅ Form email sent via Gmail API');
             } catch (emailError) {
                 console.error('❌ Gmail API send failed:', emailError.message);
-                throw emailError;
+                console.error('Gmail error details:', emailError);
+                // Fall back to SMTP
+                console.log('📧 Falling back to SMTP...');
+                try {
+                    const result = await sendEmail({
+                        to: contactEmail,
+                        subject: `${form.title} - ${business.name}`,
+                        html: emailContent,
+                    });
+                    console.log('✅ Form email sent via SMTP (fallback):', result);
+                } catch (smtpError) {
+                    console.error('❌ SMTP fallback also failed:', smtpError.message);
+                    throw smtpError;
+                }
             }
         } else {
-            console.log('📧 Using SMTP to send form');
+            console.log('📧 Using SMTP to send form (Gmail not connected)');
             try {
                 const result = await sendEmail({
                     to: contactEmail,

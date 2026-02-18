@@ -301,6 +301,10 @@ exports.googleCallback = async (req, res, next) => {
             business.integrations = {};
         }
 
+        console.log('🔐 [OAUTH] Storing Google OAuth tokens for business:', businessId);
+        console.log('🔐 [OAUTH] Access token received:', !!tokens.access_token);
+        console.log('🔐 [OAUTH] Refresh token received:', !!tokens.refresh_token);
+
         // Store tokens for both integrations since they use the same OAuth app
         const integrationData = {
             connected: true,
@@ -315,9 +319,14 @@ exports.googleCallback = async (req, res, next) => {
 
         await business.save();
 
+        console.log('✅ [OAUTH] Google integrations saved successfully');
+        console.log('✅ [OAUTH] Gmail connected:', business.integrations.gmail.connected);
+        console.log('✅ [OAUTH] Calendar connected:', business.integrations.googleCalendar.connected);
+
         // Return success - frontend callback page will handle the redirect
         res.json({ message: 'Google Account connected successfully' });
     } catch (error) {
+        console.error('❌ [OAUTH] Google callback error:', error);
         next(error);
     }
 };
@@ -388,8 +397,16 @@ exports.gmailCallback = async (req, res, next) => {
             return res.status(400).json({ message: 'Missing authorization code or business ID' });
         }
 
+        console.log('🔐 [GMAIL OAUTH] Starting Gmail OAuth callback for business:', businessId);
+
         // Exchange code for tokens
         const tokens = await gmailService.exchangeCode(code);
+
+        console.log('🔐 [GMAIL OAUTH] Tokens received:', {
+            hasAccessToken: !!tokens.access_token,
+            hasRefreshToken: !!tokens.refresh_token,
+            expiryDate: tokens.expiry_date
+        });
 
         // Get user's email address
         const oauth2Client = new google.auth.OAuth2(
@@ -400,6 +417,8 @@ exports.gmailCallback = async (req, res, next) => {
         oauth2Client.setCredentials(tokens);
         const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
         const profile = await gmail.users.getProfile({ userId: 'me' });
+
+        console.log('📧 [GMAIL OAUTH] Gmail profile retrieved:', profile.data.emailAddress);
 
         // Store encrypted tokens
         const business = await Business.findById(businessId);
@@ -426,6 +445,10 @@ exports.gmailCallback = async (req, res, next) => {
 
         await business.save();
 
+        console.log('✅ [GMAIL OAUTH] Gmail integration saved successfully');
+        console.log('✅ [GMAIL OAUTH] Connected:', business.integrations.gmail.connected);
+        console.log('✅ [GMAIL OAUTH] Email:', business.integrations.gmail.email);
+
         // Trigger initial sync in background
         gmailService.syncEmails(businessId).catch(err => {
             console.error('Initial Gmail sync failed:', err);
@@ -443,6 +466,7 @@ exports.gmailCallback = async (req, res, next) => {
             email: profile.data.emailAddress
         });
     } catch (error) {
+        console.error('❌ [GMAIL OAUTH] Callback error:', error);
         next(error);
     }
 };

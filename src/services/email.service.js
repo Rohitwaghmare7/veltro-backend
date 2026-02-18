@@ -184,21 +184,26 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId, at
             console.log('✅ Email sent via SMTP to:', to);
         }
 
-        // Log successful automation
+        // Log successful automation (only if trigger is provided and valid)
         if (trigger && businessId) {
-            await AutomationLog.create({
-                trigger,
-                businessId,
-                contactId,
-                firedAt: new Date(),
-                type: 'email',
-                success: true,
-                metadata: {
-                    messageId,
-                    to,
-                    subject,
-                },
-            });
+            try {
+                await AutomationLog.create({
+                    trigger,
+                    businessId,
+                    contactId,
+                    firedAt: new Date(),
+                    type: 'email',
+                    success: true,
+                    metadata: {
+                        messageId,
+                        to,
+                        subject,
+                    },
+                });
+            } catch (logError) {
+                // Don't fail email sending if logging fails
+                console.warn('⚠️ Failed to log automation:', logError.message);
+            }
         }
 
         console.log('✅ Email sent successfully');
@@ -206,17 +211,22 @@ const sendEmail = async ({ to, subject, html, businessId, trigger, contactId, at
     } catch (error) {
         console.error('❌ Email send failed:', error.message);
 
-        // Log failed automation
+        // Log failed automation (only if trigger is provided and valid)
         if (trigger && businessId) {
-            await AutomationLog.create({
-                trigger,
-                businessId,
-                contactId,
-                firedAt: new Date(),
-                type: 'email',
-                success: false,
-                error: error.message,
-            });
+            try {
+                await AutomationLog.create({
+                    trigger,
+                    businessId,
+                    contactId,
+                    firedAt: new Date(),
+                    type: 'email',
+                    success: false,
+                    error: error.message,
+                });
+            } catch (logError) {
+                // Don't fail email sending if logging fails
+                console.warn('⚠️ Failed to log automation error:', logError.message);
+            }
         }
 
         return { success: false, error: error.message };

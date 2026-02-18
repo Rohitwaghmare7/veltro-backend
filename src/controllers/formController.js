@@ -447,3 +447,34 @@ exports.submitForm = async (req, res, next) => {
         next(error);
     }
 };
+
+// @desc    Toggle form as default booking form
+// @route   PATCH /api/forms/:id/toggle-default
+// @access  Private
+exports.toggleDefaultBookingForm = async (req, res, next) => {
+    try {
+        const form = await Form.findOne({ _id: req.params.id, businessId: req.businessId });
+
+        if (!form) {
+            return res.status(404).json({ success: false, message: 'Form not found' });
+        }
+
+        // If setting this form as default, unset all other forms
+        if (!form.isDefaultBookingForm) {
+            await Form.updateMany(
+                { businessId: req.businessId, _id: { $ne: req.params.id } },
+                { $set: { isDefaultBookingForm: false } }
+            );
+            form.isDefaultBookingForm = true;
+        } else {
+            // If unsetting, just toggle this form
+            form.isDefaultBookingForm = false;
+        }
+
+        await form.save();
+
+        res.json({ success: true, data: form });
+    } catch (error) {
+        next(error);
+    }
+};
