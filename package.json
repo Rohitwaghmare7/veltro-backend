@@ -1,7 +1,7 @@
 {
-  "name": "thierobbs-backend",
+  "name": "viltro-backend",
   "version": "1.0.0",
-  "description": "Thierobbs Business CRM - Backend API",
+  "description": "Viltro Business CRM - Backend API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

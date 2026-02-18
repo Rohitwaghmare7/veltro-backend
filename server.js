@@ -13,6 +13,7 @@ const { performanceMonitor, metricsCollector, getMetrics, resetMetrics } = requi
 // Route imports
 const authRoutes = require('./src/routes/auth');
 const onboardingRoutes = require('./src/routes/onboarding');
+const voiceOnboardingRoutes = require('./src/routes/voiceOnboarding.routes');
 const bookingRoutes = require('./src/routes/bookings');
 const leadRoutes = require('./src/routes/leads');
 const dashboardRoutes = require('./src/routes/dashboard');
@@ -175,6 +176,7 @@ app.post('/api/metrics/reset', (req, res) => {
 // Mount routes
 app.use('/api/auth', authRoutes);
 app.use('/api/onboarding', onboardingRoutes);
+app.use('/api/onboarding', voiceOnboardingRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
